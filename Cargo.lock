@@ -198,7 +198,7 @@ dependencies = [
 
 [[package]]
 name = "ckb-extension-fee-estimator"
-version = "0.1.0-alpha.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "ckb-fee-estimator",

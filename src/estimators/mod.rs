@@ -47,7 +47,7 @@ impl fmt::Display for FeeEstimatorParams {
 impl FeeEstimatorController {
     pub(crate) fn estimate_fee_rate(&self, inputs: Value) -> RpcResult<Option<types::FeeRate>> {
         log::trace!("estimate fee rate");
-        let mut sender = self.sender.clone();
+        let sender = self.sender.clone();
         let (sender1, receiver1) = oneshot::channel();
         let inputs = FeeEstimatorParams::Estimate(inputs);
         if let Err(err) = sender.try_send((inputs, Some(sender1))) {
@@ -67,7 +67,7 @@ impl FeeEstimatorController {
     }
 
     pub(crate) fn submit_transaction(&self, tx: types::Transaction) {
-        let mut sender = self.sender.clone();
+        let sender = self.sender.clone();
         let inputs = FeeEstimatorParams::NewTransaction(tx);
         if let Err(err) = sender.try_send((inputs, None)) {
             log::error!("failed to send a message since {}", err);
@@ -75,7 +75,7 @@ impl FeeEstimatorController {
     }
 
     pub(crate) fn commit_block(&self, block: types::Block) {
-        let mut sender = self.sender.clone();
+        let sender = self.sender.clone();
         let inputs = FeeEstimatorParams::NewBlock(block);
         if let Err(err) = sender.try_send((inputs, None)) {
             log::error!("failed to send a message since {}", err);

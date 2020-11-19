@@ -45,7 +45,7 @@ CKB extension to estimate transaction fees.
 
 ### `estimate_fee_rate`
 
-- Parameter:
+- Parameters:
 
   - `algorithm`: The algorithm which used for estimating fee rate.
 

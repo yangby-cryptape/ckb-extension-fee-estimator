@@ -7,6 +7,8 @@ license = "MIT"
 description = "CKB extension to estimate transaction fees."
 homepage = "https://github.com/yangby-cryptape/ckb-extension-fee-estimator"
 repository = "https://github.com/yangby-cryptape/ckb-extension-fee-estimator"
+readme = "README.md"
+include = ["src/**/*", "LICENSE", "README.md"]
 
 [[bin]]
 name = "ckb-fee-estimator"

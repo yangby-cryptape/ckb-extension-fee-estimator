@@ -1,0 +1,11 @@
+[package]
+name = "ckb-extension-fee-estimator"
+version = "0.1.0-alpha.0"
+authors = ["Boyu Yang <yangby@cryptape.com>"]
+edition = "2018"
+license = "MIT"
+description = "CKB extension to estimate transaction fees."
+homepage = "https://github.com/yangby-cryptape/ckb-extension-fee-estimator"
+repository = "https://github.com/yangby-cryptape/ckb-extension-fee-estimator"
+
+[dependencies]

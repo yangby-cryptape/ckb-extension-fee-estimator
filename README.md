@@ -2,11 +2,15 @@
 
 [![License]](#license)
 [![GitHub Actions]](https://github.com/yangby-cryptape/ckb-extension-fee-estimator/actions)
+[![Crate Badge]](https://crates.io/crates/ckb-extension-fee-estimator)
+[![Crate Doc]](https://docs.rs/ckb-extension-fee-estimator)
 
 CKB extension to estimate transaction fees.
 
 [License]: https://img.shields.io/badge/License-MIT-blue.svg
 [GitHub Actions]: https://github.com/yangby-cryptape/ckb-extension-fee-estimator/workflows/CI/badge.svg
+[Crate Badge]: https://img.shields.io/crates/v/ckb-extension-fee-estimator.svg
+[Crate Doc]: https://docs.rs/ckb-extension-fee-estimator/badge.svg
 
 ## :warning: Warning
 

@@ -15,9 +15,9 @@ name = "ckb-fee-estimator"
 path = "src/bin.rs"
 
 [dependencies]
-ckb-types = "0.38.0"
-ckb-jsonrpc-types = "0.38.0"
-ckb-fee-estimator = "0.38.0"
+ckb-types = "0.39.0"
+ckb-jsonrpc-types = "0.39.0"
+ckb-fee-estimator = "0.39.0"
 faketime = "0.2.0"
 anyhow = "1.0.37"
 thiserror = "1.0.23"

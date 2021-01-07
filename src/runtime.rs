@@ -13,7 +13,7 @@ pub(crate) type Runtime = Arc<RawRuntime>;
 pub(crate) fn initialize(_args: &Arguments) -> Result<Runtime> {
     Builder::new_multi_thread()
         .worker_threads(8)
-        .max_threads(64)
+        .max_blocking_threads(64)
         .enable_time()
         .enable_io()
         .thread_name_fn(|| {

@@ -41,7 +41,10 @@ CKB extension to estimate transaction fees.
 
    ```bash
    curl -H 'content-type: application/json' \
-       -d '{"id": 2,"jsonrpc": "2.0","method": "estimate_fee_rate","params": [{"algorithm":"vbytes-flow", "probability":0.90, "target_minutes": 10}]}' \
+       -d '{"id":2,"jsonrpc":"2.0","method":"estimate_fee_rate","params":[{"algorithm":"vbytes-flow","probability":0.90,"target_minutes":10}]}' \
+       "http://localhost:8080"
+   curl -H 'content-type: application/json' \
+       -d '{"id":2,"jsonrpc":"2.0","method":"estimate_fee_rate","params":[{"algorithm":"confirmation-fraction","expect_confirm_blocks":100}]}' \
        "http://localhost:8080"
    ```
 
@@ -60,15 +63,11 @@ CKB extension to estimate transaction fees.
     - For `vbytes-flow` algorithm, `probability` (a 32-bit floating point) and `target_minutes` (a 32-bit unsigned integer) should be provided.
     - For `confirmation-fraction` algorithm, `expect_confirm_blocks` (a 32-bit unsigned integer) should be provided.
 
-- Returns (Algorithm-related):
+- Returns:
 
-  - For `vbytes-flow` algorithm,
-    - Returns fee rate (a 64-bit unsigned integer) or null.
-    - With the returned fee rate, the probability of the transaction to be committed in `target_minutes` should be equal or greater than `probability`.
-
-  - For `confirmation-fraction` algorithm,
-    - Returns fee rate (a 64-bit unsigned integer) or 0.
-    - With the returned fee rate, the transaction will be committed in `expect_confirm_blocks` blocks.
+  - Fee rate (a 64-bit unsigned integer) or null.
+    - For `vbytes-flow` algorithm, with the returned fee rate, the probability of the transaction to be committed in `target_minutes` should be equal or greater than `probability`.
+    - For `confirmation-fraction` algorithm, with the returned fee rate, the transaction will be committed in `expect_confirm_blocks` blocks.
 
 ## Algorithms
 

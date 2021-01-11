@@ -231,11 +231,16 @@ impl TxConfirmStat {
         confirm_blocks: usize,
         required_samples: usize,
         required_confirm_rate: f64,
-    ) -> FeeRate {
+    ) -> Option<FeeRate> {
         // A tx need 1 block to propose, then 2 block to get confirmed
         // so at least confirm blocks is 3 blocks.
         if confirm_blocks < 3 || required_samples == 0 {
-            return FeeRate::zero();
+            log::warn!(
+                "confirm_blocks(={}) < 3 || required_samples(={}) == 0",
+                confirm_blocks,
+                required_samples
+            );
+            return None;
         }
         let mut confirmed_txs = 0f64;
         let mut txs_count = 0f64;
@@ -282,7 +287,8 @@ impl TxConfirmStat {
         }
 
         if !find_best {
-            return FeeRate::zero();
+            log::warn!("did not find the best bucket");
+            return None;
         }
 
         let best_range_txs_count: f64 = self.bucket_stats[best_bucket_start..=best_bucket_end]
@@ -296,13 +302,15 @@ impl TxConfirmStat {
             for bucket in &self.bucket_stats[best_bucket_start..=best_bucket_end] {
                 // find the median bucket
                 if bucket.txs_count >= half_count {
-                    return bucket.avg_fee_rate();
+                    return Some(bucket.avg_fee_rate());
                 } else {
                     half_count -= bucket.txs_count;
                 }
             }
         }
-        FeeRate::zero()
+
+        log::warn!("did not find the best fee rate");
+        None
     }
 }
 
@@ -403,7 +411,7 @@ impl Estimator {
     */
 
     /// estimate a fee rate for confirm target
-    fn estimate(&self, expect_confirm_blocks: usize) -> FeeRate {
+    fn estimate(&self, expect_confirm_blocks: usize) -> Option<FeeRate> {
         self.tx_confirm_stat.estimate_median(
             expect_confirm_blocks,
             MIN_ESTIMATE_SAMPLES,
@@ -447,17 +455,35 @@ mod tests {
             stat.add_confirmed_tx(blocks_to_confirm, FeeRate::from_u64(fee_rate));
         }
         // test basic median fee rate
-        assert_eq!(stat.estimate_median(5, 3, 1f64), FeeRate::from_u64(3000));
+        assert_eq!(
+            stat.estimate_median(5, 3, 1f64),
+            Some(FeeRate::from_u64(3000))
+        );
         // test different required samples
-        assert_eq!(stat.estimate_median(10, 1, 1f64), FeeRate::from_u64(1500));
-        assert_eq!(stat.estimate_median(10, 3, 1f64), FeeRate::from_u64(2050));
-        assert_eq!(stat.estimate_median(10, 4, 1f64), FeeRate::from_u64(2050));
-        assert_eq!(stat.estimate_median(15, 2, 1f64), FeeRate::from_u64(1000));
-        assert_eq!(stat.estimate_median(15, 3, 1f64), FeeRate::from_u64(1200));
+        assert_eq!(
+            stat.estimate_median(10, 1, 1f64),
+            Some(FeeRate::from_u64(1500))
+        );
+        assert_eq!(
+            stat.estimate_median(10, 3, 1f64),
+            Some(FeeRate::from_u64(2050))
+        );
+        assert_eq!(
+            stat.estimate_median(10, 4, 1f64),
+            Some(FeeRate::from_u64(2050))
+        );
+        assert_eq!(
+            stat.estimate_median(15, 2, 1f64),
+            Some(FeeRate::from_u64(1000))
+        );
+        assert_eq!(
+            stat.estimate_median(15, 3, 1f64),
+            Some(FeeRate::from_u64(1200))
+        );
         // test return zero if confirm_blocks or required_samples is zero
-        assert_eq!(stat.estimate_median(0, 4, 1f64), FeeRate::zero());
-        assert_eq!(stat.estimate_median(15, 0, 1f64), FeeRate::zero());
-        assert_eq!(stat.estimate_median(0, 3, 1f64), FeeRate::zero());
+        assert_eq!(stat.estimate_median(0, 4, 1f64), None);
+        assert_eq!(stat.estimate_median(15, 0, 1f64), None);
+        assert_eq!(stat.estimate_median(0, 3, 1f64), None);
     }
 }
 
@@ -535,12 +561,10 @@ impl FeeEstimator {
 
 impl FeeEstimator {
     pub(crate) fn estimate(&self, params: &Params) -> Option<u64> {
-        Some(
-            self.kernel
-                .read()
-                .estimate(params.expect_confirm_blocks)
-                .as_u64(),
-        )
+        self.kernel
+            .read()
+            .estimate(params.expect_confirm_blocks)
+            .map(FeeRate::as_u64)
     }
 }
 

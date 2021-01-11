@@ -24,6 +24,7 @@ struct TransactionTable {
 // TODO Persistence
 #[derive(Default)]
 pub(crate) struct Statistics {
+    current_number: u64,
     blocks: BlockTable,
     txs: TransactionTable,
     lifetime_dur: Duration,
@@ -195,6 +196,10 @@ impl Statistics {
         Arc::new(RwLock::new(stats))
     }
 
+    pub(crate) fn current_number(&self) -> u64 {
+        self.current_number
+    }
+
     pub(crate) fn submit_transaction(&mut self, tx: &types::Transaction) {
         log::trace!("submit transaction into statistics");
         self.txs.insert(tx);
@@ -203,6 +208,7 @@ impl Statistics {
 
     pub(crate) fn commit_block(&mut self, block: &types::Block) {
         log::trace!("commit block#{} into statistics", block.number());
+        self.current_number = block.number();
         self.blocks.insert(block);
         for hash in block.tx_hashes().iter().skip(1) {
             self.txs.remove(hash);

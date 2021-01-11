@@ -59,8 +59,9 @@ struct TestSet {
     success: Vec<Duration>,
 }
 
-// Weight-Units Flow Fee Estimator
-// Ref: https://bitcoiner.live/?tab=info
+/// Weight-Units Flow Fee Estimator
+///
+/// Ref: https://bitcoiner.live/?tab=info
 #[derive(Clone)]
 pub(crate) struct FeeEstimator {
     lowest_fee_rate: FeeRate,

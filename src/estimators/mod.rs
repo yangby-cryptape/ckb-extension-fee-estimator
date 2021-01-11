@@ -9,6 +9,7 @@ use crate::{
     types,
 };
 
+pub(crate) mod confirmation_fraction;
 pub(crate) mod vbytes_flow;
 
 #[derive(Debug)]

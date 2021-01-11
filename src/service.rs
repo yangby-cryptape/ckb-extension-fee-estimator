@@ -21,6 +21,9 @@ impl Service {
             let controller =
                 estimators::vbytes_flow::FeeEstimator::new(1_000, 60 * 24, &rt, &stats).spawn();
             estimators_map.insert("vbytes-flow".to_owned(), controller);
+            let controller =
+                estimators::confirmation_fraction::FeeEstimator::new(&rt, &stats).spawn();
+            estimators_map.insert("confirmation-fraction".to_owned(), controller);
             estimators_map
         };
         let shared = Shared::initialize(args, &rt, &stats, estimators_map.clone())?;

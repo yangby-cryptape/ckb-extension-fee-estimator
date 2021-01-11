@@ -53,23 +53,32 @@ CKB extension to estimate transaction fees.
 
   - `algorithm`: The algorithm which used for estimating fee rate.
 
-    Currently, there is only one algorithm `vbytes-flow`.
+    Currently, there are two algorithms `vbytes-flow` and `confirmation-fraction`.
 
   - Algorithm-related parameters:
 
-    - For `vbytes-flow` algorithm, the `probability` (a 32-bit floating point) and `target_minutes` (a 32-bit unsigned integer) should be provided.
+    - For `vbytes-flow` algorithm, `probability` (a 32-bit floating point) and `target_minutes` (a 32-bit unsigned integer) should be provided.
+    - For `confirmation-fraction` algorithm, `expect_confirm_blocks` (a 32-bit unsigned integer) should be provided.
 
-- Returns
+- Returns (Algorithm-related):
 
-  - Fee rate (a 64-bit unsigned integer) or null.
+  - For `vbytes-flow` algorithm,
+    - Returns fee rate (a 64-bit unsigned integer) or null.
+    - With the returned fee rate, the probability of the transaction to be committed in `target_minutes` should be equal or greater than `probability`.
 
-    With the returned fee rate,  the probability of the transaction to be committed in `target_minutes` should be equal or greater than `probability`.
+  - For `confirmation-fraction` algorithm,
+    - Returns fee rate (a 64-bit unsigned integer) or 0.
+    - With the returned fee rate, the transaction will be committed in `expect_confirm_blocks` blocks.
 
 ## Algorithms
 
 ### `vbytes-flow`
 
-Follow the [Weight-Units Flow Fee Estimator for Bitcoin](https://bitcoiner.live/?tab=info)
+Follow the [Weight-Units Flow Fee Estimator for Bitcoin](https://bitcoiner.live/?tab=info).
+
+### `confirmation-fraction`
+
+More details could be found in [this CKB PR](https://github.com/nervosnetwork/ckb/pull/1659).
 
 ## License
 

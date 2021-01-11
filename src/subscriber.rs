@@ -1,7 +1,10 @@
 use std::{net::SocketAddr, result::Result as StdResult, str::FromStr as _};
 
-use futures::compat::Future01CompatExt as _;
-use jsonrpc_core::futures::{Future as _, IntoFuture as _, Sink as _, Stream as _};
+use futures::{
+    compat::{Future01CompatExt as _, Sink01CompatExt as _, Stream01CompatExt as _},
+    future, StreamExt as _,
+};
+use futures01::{Future as _, Sink as _, Stream as _};
 use jsonrpc_core_client::{transports::duplex, RpcError as JsonRpcRpcError};
 use jsonrpc_derive::rpc;
 use jsonrpc_server_utils::{
@@ -40,41 +43,39 @@ impl Subscriber {
             .block_on(fut_conn.compat())
             .map_err(Error::subscriber)?;
         let (sink, stream) = StreamCodec::stream_incoming().framed(stream).split();
-        let sink = sink.sink_map_err(|e| JsonRpcRpcError::Other(e.into()));
-        let stream = stream.map_err(|e| JsonRpcRpcError::Other(e.into()));
-        let (rpc_client, sender) = duplex(sink, stream);
+        let sink = sink
+            .sink_map_err(|err| JsonRpcRpcError::Other(Box::new(err)))
+            .sink_compat();
+        let stream = stream
+            .map_err(|err| JsonRpcRpcError::Other(Box::new(err)))
+            .compat()
+            .take_while(|x| future::ready(x.is_ok()))
+            .map(|x| x.expect("Stream is closed upon first error."));
+        let (rpc_client, sender) = duplex(Box::pin(sink), Box::pin(stream));
         let client = gen_client::Client::from(sender);
         let subscribe_tip_block = {
             let shared = shared.clone();
-            client
+            let mut stream = client
                 .subscribe(Topic::NewTipBlock)
-                .map(move |stream| {
-                    shared.runtime().spawn(
-                        stream
-                            .for_each(move |s| Self::handle_tip_block(shared.clone(), s))
-                            .into_future()
-                            .compat(),
-                    )
-                })
-                .map_err(|_| ())
-                .compat()
+                .map_err(Error::subscriber)?;
+            async move {
+                while let Some(Ok(s)) = stream.next().await {
+                    let _result = Self::handle_tip_block(shared.clone(), s);
+                }
+            }
         };
         let subscribe_transaction = {
             let shared = shared.clone();
-            client
+            let mut stream = client
                 .subscribe(Topic::NewTransaction)
-                .map(move |stream| {
-                    shared.runtime().spawn(
-                        stream
-                            .for_each(move |s| Self::handle_transaction(shared.clone(), s))
-                            .into_future()
-                            .compat(),
-                    )
-                })
-                .map_err(|_| ())
-                .compat()
+                .map_err(Error::subscriber)?;
+            async move {
+                while let Some(Ok(s)) = stream.next().await {
+                    let _result = Self::handle_transaction(shared.clone(), s);
+                }
+            }
         };
-        shared.runtime().spawn(rpc_client.map_err(|_| ()).compat());
+        shared.runtime().spawn(rpc_client);
         shared.runtime().spawn(subscribe_tip_block);
         shared.runtime().spawn(subscribe_transaction);
         let client = Subscriber;

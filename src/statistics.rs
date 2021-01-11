@@ -187,8 +187,11 @@ impl TransactionTable {
 
 impl Statistics {
     pub(crate) fn new(lifetime_minutes: u32) -> Arc<RwLock<Self>> {
-        let mut stats = Self::default();
-        stats.lifetime_dur = Duration::from_secs(u64::from(lifetime_minutes) * 60);
+        let lifetime_dur = Duration::from_secs(u64::from(lifetime_minutes) * 60);
+        let stats = Self {
+            lifetime_dur,
+            ..Default::default()
+        };
         Arc::new(RwLock::new(stats))
     }
 

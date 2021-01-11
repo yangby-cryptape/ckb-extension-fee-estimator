@@ -27,14 +27,15 @@ clap = "2.33.3"
 serde = "1.0.118"
 serde_json = "1.0.61"
 parking_lot = "0.11.1"
+futures01 = { package = "futures", version = "0.1.30" }
 futures = { version = "0.3.9", features = ["compat"] }
 tokio = { version = "1.0.1", features = ["full"] }
-jsonrpc-http-server = "15.1.0"
-jsonrpc-server-utils = "15.1.0"
-jsonrpc-core-client = "15.1.0"
-jsonrpc-derive = "15.1.0"
-jsonrpc-core = "15.1.0"
-jsonrpc-pubsub = "15.1.0"
+jsonrpc-http-server = "16.0.0"
+jsonrpc-server-utils = "16.0.0"
+jsonrpc-core-client = "16.0.0"
+jsonrpc-derive = "16.0.0"
+jsonrpc-core = "16.0.0"
+jsonrpc-pubsub = "16.0.0"
 time = "0.2.24"
 statrs = "0.13.0"
 

@@ -19,7 +19,7 @@ ckb-types = "0.39.0"
 ckb-jsonrpc-types = "0.39.0"
 ckb-fee-estimator = "0.39.0"
 faketime = "0.2.1"
-anyhow = "1.0.37"
+anyhow = "1.0.38"
 thiserror = "1.0.23"
 log = "0.4.11"
 env_logger = "0.8.2"
@@ -27,7 +27,7 @@ clap = "2.33.3"
 serde = "1.0.118"
 serde_json = "1.0.61"
 parking_lot = "0.11.1"
-futures = { version = "0.3.8", features = ["compat"] }
+futures = { version = "0.3.9", features = ["compat"] }
 tokio = { version = "1.0.1", features = ["full"] }
 jsonrpc-http-server = "15.1.0"
 jsonrpc-server-utils = "15.1.0"
@@ -35,7 +35,7 @@ jsonrpc-core-client = "15.1.0"
 jsonrpc-derive = "15.1.0"
 jsonrpc-core = "15.1.0"
 jsonrpc-pubsub = "15.1.0"
-time = "0.2.23"
+time = "0.2.24"
 statrs = "0.13.0"
 
 [badges]

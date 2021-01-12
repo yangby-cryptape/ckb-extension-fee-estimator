@@ -1,11 +1,7 @@
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use ckb_fee_estimator::FeeRate;
-use ckb_types::{core::Capacity, packed};
+use ckb_types::core::Capacity;
 use parking_lot::RwLock;
 use serde::Deserialize;
 use statrs::distribution::{Poisson, Univariate};
@@ -22,6 +18,7 @@ use crate::{
     statistics::Statistics,
     types,
     utilities::unix_timestamp,
+    validator::Validator,
 };
 
 const NAME: &str = "vbytes-flow";
@@ -47,18 +44,7 @@ pub(crate) struct TxAdded {
     pub(crate) added_dt: Duration,
 }
 
-struct PendingRecord {
-    added_dt: Duration,
-    expected_dt: Duration,
-}
-
 struct TxAddedQue(VecDeque<TxAdded>);
-
-struct TestSet {
-    pending: HashMap<packed::Byte32, PendingRecord>,
-    failure: Vec<Duration>,
-    success: Vec<Duration>,
-}
 
 /// Weight-Units Flow Fee Estimator
 ///
@@ -68,7 +54,7 @@ pub(in crate::estimators) struct FeeEstimator {
     max_target_dur: Duration,
     boot_dt: Duration,
     txs: TxAddedQue,
-    testset: TestSet,
+    validator: Validator<Duration>,
     statistics: Arc<RwLock<Statistics>>,
 }
 
@@ -131,38 +117,6 @@ impl TxAddedQue {
             .map(|tx| &tx.status)
             .map(ToOwned::to_owned)
             .collect::<Vec<_>>()
-    }
-}
-
-impl TestSet {
-    fn expire(&mut self, current_dt: Duration) {
-        let mut failure = Vec::new();
-        for hash in self.pending.keys() {
-            let expected_dt = self.pending.get(&hash).unwrap().expected_dt;
-            if current_dt > expected_dt {
-                failure.push(hash.to_owned());
-            }
-        }
-        for hash in failure {
-            let tx = self.pending.remove(&hash).unwrap();
-            self.failure.push(tx.added_dt);
-        }
-    }
-
-    fn confirm(&mut self, block: &types::Block) {
-        let mut success = Vec::new();
-        for hash in block.tx_hashes() {
-            if self.pending.contains_key(&hash) {
-                success.push(hash.to_owned());
-            }
-        }
-        for hash in success {
-            let tx = self.pending.remove(&hash).unwrap();
-            self.success.push(tx.added_dt);
-        }
-    }
-    fn score(&self) -> (usize, usize) {
-        (self.success.len(), self.failure.len())
     }
 }
 
@@ -451,17 +405,12 @@ impl FeeEstimator {
         rt: &Runtime,
         stats: &Arc<RwLock<Statistics>>,
     ) -> super::Controller {
-        let testset = TestSet {
-            pending: HashMap::new(),
-            failure: Vec::new(),
-            success: Vec::new(),
-        };
         Self {
             lowest_fee_rate: FeeRate::from_u64(lowest_fee_rate),
             max_target_dur: Duration::from_secs(max_target_minutes * 60),
             boot_dt: unix_timestamp(),
             txs: TxAddedQue(VecDeque::new()),
-            testset,
+            validator: Validator::new(NAME),
             statistics: Arc::clone(stats),
         }
         .spawn(rt)
@@ -570,7 +519,7 @@ impl FeeEstimator {
         {
             let mut minutes_opt: Option<u32> = None;
             let probability = 0.9;
-            for target_minutes in &[10, 30, 60, 60 * 2, 60 * 3, 60 * 6, 60 * 12, 60 * 24] {
+            for target_minutes in Validator::<Duration>::target_minutes() {
                 if self.can_estimate(*target_minutes) {
                     let params = Params {
                         probability,
@@ -589,19 +538,15 @@ impl FeeEstimator {
                 }
             }
             if let Some(minutes) = minutes_opt {
+                let expected_dt = current_dt + Duration::from_secs(u64::from(minutes) * 60);
                 log::trace!(
-                    "new-tx: tx {:#x} has {:.2}% probability commit in {} minutes",
+                    "new-tx: tx {:#x} has {:.2}% probability commit in {} minutes (before {})",
                     tx.hash(),
                     probability * 100.0,
-                    minutes
+                    minutes,
+                    expected_dt.pretty()
                 );
-                let added_dt = current_dt;
-                let expected_dt = current_dt + Duration::from_secs(u64::from(minutes) * 60);
-                let record = PendingRecord {
-                    added_dt,
-                    expected_dt,
-                };
-                self.testset.pending.insert(tx.hash(), record);
+                self.validator.predict(tx.hash(), current_dt, expected_dt);
             } else {
                 log::trace!("new-tx: no suitable fee rate");
             }
@@ -610,11 +555,8 @@ impl FeeEstimator {
 
     fn commit_block(&mut self, block: &types::Block) {
         let current_dt = block.seen_dt();
-        self.testset.expire(current_dt);
-        self.testset.confirm(block);
-        let (success_cnt, failure_cnt) = self.testset.score();
-        let total = success_cnt + failure_cnt;
-        let accuracy = f64::from(success_cnt as u32) / f64::from(total as u32);
-        log::trace!("accuracy: {:.2} (total: {})", accuracy, total);
+        self.validator.expire(current_dt);
+        self.validator.confirm(block);
+        self.validator.trace_score();
     }
 }

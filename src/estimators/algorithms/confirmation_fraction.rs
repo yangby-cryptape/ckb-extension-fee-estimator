@@ -19,6 +19,7 @@ use crate::{
     runtime::Runtime,
     statistics::Statistics,
     types,
+    validator::Validator,
 };
 
 const NAME: &str = "confirmation-fraction";
@@ -511,6 +512,7 @@ struct Params {
 pub(in crate::estimators) struct FeeEstimator {
     min_samples: usize,
     kernel: Estimator,
+    validator: Validator<u64>,
     statistics: Arc<RwLock<Statistics>>,
 }
 
@@ -536,6 +538,7 @@ impl FeeEstimator {
         Self {
             min_samples,
             kernel,
+            validator: Validator::new(NAME),
             statistics: Arc::clone(stats),
         }
         .spawn(rt)
@@ -634,8 +637,39 @@ impl FeeEstimator {
     fn submit_transaction(&mut self, tx: &types::Transaction) {
         let vbytes = patches::get_transaction_virtual_bytes(tx.size() as usize, tx.cycles());
         let fee_rate = FeeRate::calculate(Capacity::shannons(tx.fee()), vbytes as usize);
-        self.kernel
-            .track_tx(tx.hash(), fee_rate, self.statistics.read().current_number());
+        let current_number = self.statistics.read().current_number();
+        self.kernel.track_tx(tx.hash(), fee_rate, current_number);
+        {
+            let mut blocks_opt: Option<u64> = None;
+            let probability = 0.9;
+            for target_blocks in Validator::<u64>::target_blocks() {
+                let params = Params {
+                    probability,
+                    target_blocks: *target_blocks,
+                };
+                let result = self.estimate(&params);
+                if let Some(fee_rate_tmp) = result {
+                    if fee_rate >= FeeRate::from_u64(fee_rate_tmp) {
+                        blocks_opt = Some(u64::from(*target_blocks));
+                        break;
+                    }
+                }
+            }
+            if let Some(blocks) = blocks_opt {
+                let expected = current_number + blocks;
+                log::trace!(
+                    "new-tx: tx {:#x} has {:.2}% probability commit in {} blocks (before block#{})",
+                    tx.hash(),
+                    probability,
+                    blocks,
+                    expected
+                );
+                let current_dt = tx.seen_dt();
+                self.validator.predict(tx.hash(), current_dt, expected);
+            } else {
+                log::trace!("new-tx: no suitable fee rate");
+            }
+        }
     }
 
     fn commit_block(&mut self, block: &types::Block) {
@@ -643,5 +677,9 @@ impl FeeEstimator {
             block.number(),
             block.tx_hashes().iter().map(ToOwned::to_owned),
         );
+        let current_number = self.statistics.read().current_number();
+        self.validator.expire(current_number);
+        self.validator.confirm(block);
+        self.validator.trace_score();
     }
 }

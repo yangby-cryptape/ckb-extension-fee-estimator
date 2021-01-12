@@ -11,6 +11,7 @@ mod statistics;
 mod subscriber;
 mod types;
 mod utilities;
+mod validator;
 
 fn main() -> anyhow::Result<()> {
     env_logger::init();

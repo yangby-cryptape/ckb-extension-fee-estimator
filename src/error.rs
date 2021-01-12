@@ -9,6 +9,8 @@ pub(crate) enum Error {
     Config(String),
     #[error("runtime error: {0}")]
     Runtime(String),
+    #[error("exit error: {0}")]
+    Exit(#[from] ctrlc::Error),
     #[error("subscriber error: {0}")]
     Subscriber(String),
     #[error("server error: {0}")]

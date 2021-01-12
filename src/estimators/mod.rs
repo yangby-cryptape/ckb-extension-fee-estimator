@@ -1,85 +1,63 @@
-use std::fmt;
+use std::{collections::HashMap, sync::Arc};
 
+use parking_lot::RwLock;
 use serde_json::Value;
-use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     error::{RpcError, RpcResult},
     runtime::Runtime,
+    statistics::Statistics,
     types,
 };
 
-pub(crate) mod confirmation_fraction;
-pub(crate) mod vbytes_flow;
+mod algorithms;
 
-#[derive(Debug)]
-enum FeeEstimatorParams {
-    Estimate(Value),
-    NewTransaction(types::Transaction),
-    NewBlock(types::Block),
-}
-
-#[derive(Debug)]
-enum FeeEstimatorResult {
-    Estimate(RpcResult<Option<types::FeeRate>>),
-    NoReturn,
-}
+use algorithms::{
+    confirmation_fraction::FeeEstimator as ConfirmationFractionFE,
+    vbytes_flow::FeeEstimator as VbytesFlowFE,
+};
 
 #[derive(Clone)]
 pub(crate) struct FeeEstimatorController {
-    runtime: Runtime,
-    sender: mpsc::Sender<(
-        FeeEstimatorParams,
-        Option<oneshot::Sender<FeeEstimatorResult>>,
-    )>,
-}
-
-impl fmt::Display for FeeEstimatorParams {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let name = match self {
-            Self::Estimate(_) => "Estimate",
-            Self::NewTransaction(_) => "NewTransaction",
-            Self::NewBlock(_) => "NewBlock",
-        };
-        write!(f, "{}", name)
-    }
+    estimators: Arc<HashMap<&'static str, algorithms::Controller>>,
 }
 
 impl FeeEstimatorController {
-    pub(crate) fn estimate_fee_rate(&self, inputs: Value) -> RpcResult<Option<types::FeeRate>> {
-        log::trace!("estimate fee rate");
-        let sender = self.sender.clone();
-        let (sender1, receiver1) = oneshot::channel();
-        let inputs = FeeEstimatorParams::Estimate(inputs);
-        if let Err(err) = sender.try_send((inputs, Some(sender1))) {
-            log::error!("failed to send a message since {}", err);
-        }
-        let recv_data = self
-            .runtime
-            .block_on(receiver1)
-            .map_err(|_| RpcError::other("internal error: broken channel"))?;
-        if let FeeEstimatorResult::Estimate(res) = recv_data {
-            res
-        } else {
-            Err(RpcError::other(
-                "internal error: unexpected estimate result",
-            ))
-        }
+    pub(crate) fn initialize(rt: &Runtime, stats: &Arc<RwLock<Statistics>>) -> Self {
+        let estimators = {
+            let mut estimators = HashMap::new();
+            let controller = VbytesFlowFE::new_controller(1_000, 60 * 24, rt, stats);
+            estimators.insert(controller.name(), controller);
+            let controller =
+                ConfirmationFractionFE::new_controller(10_000, 20, 1e3, 1e7, 1.05, rt, stats);
+            estimators.insert(controller.name(), controller);
+            Arc::new(estimators)
+        };
+        Self { estimators }
+    }
+
+    pub(crate) fn estimate_fee_rate(
+        &self,
+        algorithm: &str,
+        inputs: Value,
+    ) -> RpcResult<Option<types::FeeRate>> {
+        self.estimators
+            .get(algorithm)
+            .ok_or_else(|| RpcError::other(format!("no such algorithm `{}`", algorithm)))
+            .and_then(|controller| controller.estimate_fee_rate(inputs))
     }
 
     pub(crate) fn submit_transaction(&self, tx: types::Transaction) {
-        let sender = self.sender.clone();
-        let inputs = FeeEstimatorParams::NewTransaction(tx);
-        if let Err(err) = sender.try_send((inputs, None)) {
-            log::error!("failed to send a message since {}", err);
+        for (name, estimator) in self.estimators.iter() {
+            log::trace!("submit transaction to {}", name);
+            estimator.submit_transaction(tx.clone());
         }
     }
 
     pub(crate) fn commit_block(&self, block: types::Block) {
-        let sender = self.sender.clone();
-        let inputs = FeeEstimatorParams::NewBlock(block);
-        if let Err(err) = sender.try_send((inputs, None)) {
-            log::error!("failed to send a message since {}", err);
+        for (name, estimator) in self.estimators.iter() {
+            log::trace!("commit block to {}", name);
+            estimator.commit_block(block.clone())
         }
     }
 }

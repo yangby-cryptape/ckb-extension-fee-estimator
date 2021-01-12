@@ -14,7 +14,6 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 
-use super::{FeeEstimatorController, FeeEstimatorParams, FeeEstimatorResult};
 use crate::{
     error::{RpcError, RpcResult},
     patches,
@@ -25,11 +24,13 @@ use crate::{
     utilities::unix_timestamp,
 };
 
+const NAME: &str = "vbytes-flow";
+
 const FEE_RATE_UNIT: u64 = 1000;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) struct Params {
+struct Params {
     probability: f32,
     target_minutes: u32,
 }
@@ -62,14 +63,12 @@ struct TestSet {
 /// Weight-Units Flow Fee Estimator
 ///
 /// Ref: https://bitcoiner.live/?tab=info
-#[derive(Clone)]
-pub(crate) struct FeeEstimator {
+pub(in crate::estimators) struct FeeEstimator {
     lowest_fee_rate: FeeRate,
     max_target_dur: Duration,
     boot_dt: Duration,
-    txs: Arc<RwLock<TxAddedQue>>,
-    testset: Arc<RwLock<TestSet>>,
-    runtime: Runtime,
+    txs: TxAddedQue,
+    testset: TestSet,
     statistics: Arc<RwLock<Statistics>>,
 }
 
@@ -168,79 +167,6 @@ impl TestSet {
 }
 
 impl FeeEstimator {
-    pub(crate) fn new(
-        lowest_fee_rate: u64,
-        max_target_minutes: u64,
-        rt: &Runtime,
-        stats: &Arc<RwLock<Statistics>>,
-    ) -> Self {
-        let testset = TestSet {
-            pending: HashMap::new(),
-            failure: Vec::new(),
-            success: Vec::new(),
-        };
-        Self {
-            lowest_fee_rate: FeeRate::from_u64(lowest_fee_rate),
-            max_target_dur: Duration::from_secs(max_target_minutes * 60),
-            boot_dt: unix_timestamp(),
-            txs: Arc::new(RwLock::new(TxAddedQue(VecDeque::new()))),
-            testset: Arc::new(RwLock::new(testset)),
-            runtime: rt.clone(),
-            statistics: Arc::clone(stats),
-        }
-    }
-
-    pub(crate) fn spawn(self) -> FeeEstimatorController {
-        let (sender, mut receiver) = mpsc::channel::<(
-            FeeEstimatorParams,
-            Option<oneshot::Sender<FeeEstimatorResult>>,
-        )>(100);
-        let runtime = self.runtime.clone();
-        runtime.spawn(async move {
-            let estimator = self;
-            loop {
-                select! {
-                    Some((message, sender1_opt)) = receiver.recv() => {
-                        let estimator_clone= estimator.clone();
-                        let resp = estimator_clone.process(message).await;
-                        if let Some(sender1) = sender1_opt {
-                            let _ = sender1.send(resp);
-                        }
-                    },
-                    else => break,
-                }
-            }
-        });
-        FeeEstimatorController { runtime, sender }
-    }
-
-    async fn process(&self, msg: FeeEstimatorParams) -> FeeEstimatorResult {
-        log::trace!("process {} message", msg);
-        match msg {
-            FeeEstimatorParams::Estimate(value) => match serde_json::from_value(value) {
-                Ok(params) => {
-                    if let Err(err) = self.check_estimate_params(&params) {
-                        FeeEstimatorResult::Estimate(Err(err))
-                    } else {
-                        let fee_rate_opt = self.estimate(&params);
-                        FeeEstimatorResult::Estimate(Ok(fee_rate_opt))
-                    }
-                }
-                Err(err) => FeeEstimatorResult::Estimate(Err(err.into())),
-            },
-            FeeEstimatorParams::NewTransaction(tx) => {
-                self.submit_transaction(&tx);
-                FeeEstimatorResult::NoReturn
-            }
-            FeeEstimatorParams::NewBlock(block) => {
-                self.commit_block(&block);
-                FeeEstimatorResult::NoReturn
-            }
-        }
-    }
-}
-
-impl FeeEstimator {
     fn historical_dur(target_dur: Duration) -> Duration {
         if target_dur <= Duration::from_secs(5 * 60) {
             Duration::from_secs(10 * 60)
@@ -249,41 +175,7 @@ impl FeeEstimator {
         }
     }
 
-    pub(crate) fn can_estimate(&self, target_minutes: u32) -> bool {
-        let target_dur = Duration::from_secs(u64::from(target_minutes) * 60);
-        if target_dur > self.max_target_dur {
-            false
-        } else {
-            let current_dt = unix_timestamp();
-            let historical_dur = Self::historical_dur(target_dur);
-            let required_boot_dt = current_dt - historical_dur;
-            required_boot_dt > self.boot_dt
-        }
-    }
-
-    pub(crate) fn check_estimate_params(&self, params: &Params) -> RpcResult<()> {
-        if params.probability < 0.000_001 {
-            return Err(RpcError::invalid_params(
-                "probability should not less than 0.000_001",
-            ));
-        }
-        if params.probability > 0.999_999 {
-            return Err(RpcError::invalid_params(
-                "probability should not greater than 0.999_999",
-            ));
-        }
-        if params.target_minutes < 1 {
-            return Err(RpcError::invalid_params(
-                "target elapsed should not less than 1 minute",
-            ));
-        }
-        if !self.can_estimate(params.target_minutes) {
-            return Err(RpcError::other("lack of empirical data"));
-        }
-        Ok(())
-    }
-
-    pub(crate) fn estimate(&self, params: &Params) -> Option<u64> {
+    fn do_estimate(&mut self, params: &Params) -> Option<u64> {
         log::trace!(
             "probability: {:.2}%, target: {} mins",
             params.probability * 100.0,
@@ -338,7 +230,7 @@ impl FeeEstimator {
             },
         );
         log::trace!("current transactions count = {}", current_txs.len());
-        self.estimate_internal(
+        self.do_estimate_internal(
             params.probability,
             target_dur,
             historical_dur,
@@ -351,8 +243,8 @@ impl FeeEstimator {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn estimate_internal(
-        &self,
+    fn do_estimate_internal(
+        &mut self,
         probability: f32,
         target_dur: Duration,
         historical_dur: Duration,
@@ -384,11 +276,13 @@ impl FeeEstimator {
                 current_weight
             };
             for (index, bucket) in current_weight_buckets.iter().enumerate() {
-                log::trace!(">>> current_weight[{}]: {}", index, bucket);
+                if *bucket != 0 {
+                    log::trace!(">>> current_weight[{}]: {}", index, bucket);
+                }
             }
             let flow_speed_buckets = {
                 let historical_dt = current_dt - historical_dur;
-                let mut txs_flowed = self.txs.read().flowed(historical_dt);
+                let mut txs_flowed = self.txs.flowed(historical_dt);
                 txs_flowed.sort();
                 txs_flowed.reverse();
                 let mut flowed = vec![0u64; max_bucket_index + 1];
@@ -410,7 +304,9 @@ impl FeeEstimator {
                     .collect::<Vec<_>>()
             };
             for (index, bucket) in flow_speed_buckets.iter().enumerate() {
-                log::trace!(">>> flow_speed[{}]: {}", index, bucket);
+                if *bucket != 0 {
+                    log::trace!(">>> flow_speed[{}]: {}", index, bucket);
+                }
             }
             let expected_blocks = {
                 let mut blocks = 0u32;
@@ -549,14 +445,128 @@ mod tests {
 }
 
 impl FeeEstimator {
-    fn submit_transaction(&self, tx: &types::Transaction) {
+    pub(in crate::estimators) fn new_controller(
+        lowest_fee_rate: u64,
+        max_target_minutes: u64,
+        rt: &Runtime,
+        stats: &Arc<RwLock<Statistics>>,
+    ) -> super::Controller {
+        let testset = TestSet {
+            pending: HashMap::new(),
+            failure: Vec::new(),
+            success: Vec::new(),
+        };
+        Self {
+            lowest_fee_rate: FeeRate::from_u64(lowest_fee_rate),
+            max_target_dur: Duration::from_secs(max_target_minutes * 60),
+            boot_dt: unix_timestamp(),
+            txs: TxAddedQue(VecDeque::new()),
+            testset,
+            statistics: Arc::clone(stats),
+        }
+        .spawn(rt)
+    }
+
+    fn spawn(self, rt: &Runtime) -> super::Controller {
+        let (sender, mut receiver) =
+            mpsc::channel::<(super::Params, Option<oneshot::Sender<super::Result>>)>(100);
+        let runtime = rt.clone();
+        runtime.spawn(async move {
+            let mut estimator = self;
+            loop {
+                select! {
+                    Some((message, sender1_opt)) = receiver.recv() => {
+                        let resp = estimator.process(message).await;
+                        if let Some(sender1) = sender1_opt {
+                            let _ = sender1.send(resp);
+                        }
+                    },
+                    else => break,
+                }
+            }
+        });
+        super::Controller {
+            name: NAME,
+            runtime,
+            sender,
+        }
+    }
+
+    async fn process(&mut self, msg: super::Params) -> super::Result {
+        log::trace!("process {} message", msg);
+        match msg {
+            super::Params::Estimate(value) => match serde_json::from_value(value) {
+                Ok(params) => {
+                    if let Err(err) = self.check_estimate_params(&params) {
+                        super::Result::Estimate(Err(err))
+                    } else {
+                        let fee_rate_opt = self.estimate(&params);
+                        super::Result::Estimate(Ok(fee_rate_opt))
+                    }
+                }
+                Err(err) => super::Result::Estimate(Err(err.into())),
+            },
+            super::Params::NewTransaction(tx) => {
+                self.submit_transaction(&tx);
+                super::Result::NoReturn
+            }
+            super::Params::NewBlock(block) => {
+                self.commit_block(&block);
+                super::Result::NoReturn
+            }
+        }
+    }
+}
+
+impl FeeEstimator {
+    fn can_estimate(&self, target_minutes: u32) -> bool {
+        let target_dur = Duration::from_secs(u64::from(target_minutes) * 60);
+        if target_dur > self.max_target_dur {
+            false
+        } else {
+            let current_dt = unix_timestamp();
+            let historical_dur = Self::historical_dur(target_dur);
+            let required_boot_dt = current_dt - historical_dur;
+            required_boot_dt > self.boot_dt
+        }
+    }
+
+    fn check_estimate_params(&self, params: &Params) -> RpcResult<()> {
+        if params.probability < 0.000_001 {
+            return Err(RpcError::invalid_params(
+                "probability should not less than 0.000_001",
+            ));
+        }
+        if params.probability > 0.999_999 {
+            return Err(RpcError::invalid_params(
+                "probability should not greater than 0.999_999",
+            ));
+        }
+        if params.target_minutes < 1 {
+            return Err(RpcError::invalid_params(
+                "target elapsed should not less than 1 minute",
+            ));
+        }
+        if !self.can_estimate(params.target_minutes) {
+            return Err(RpcError::other("lack of empirical data"));
+        }
+        Ok(())
+    }
+
+    fn estimate(&mut self, params: &Params) -> Option<u64> {
+        self.do_estimate(params)
+    }
+}
+
+impl FeeEstimator {
+    fn submit_transaction(&mut self, tx: &types::Transaction) {
         let current_dt = tx.seen_dt();
         let expired_dt = current_dt - Self::historical_dur(self.max_target_dur);
         let vbytes = patches::get_transaction_virtual_bytes(tx.size() as usize, tx.cycles());
         let fee_rate = FeeRate::calculate(Capacity::shannons(tx.fee()), vbytes as usize);
         let new_tx = TxAdded::new(vbytes as usize, fee_rate, current_dt);
-        self.txs.write().add_transaction(new_tx);
-        self.txs.write().expire(expired_dt);
+        self.txs.add_transaction(new_tx);
+        self.txs.expire(expired_dt);
         {
             let mut minutes_opt: Option<u32> = None;
             let probability = 0.9;
@@ -591,18 +601,18 @@ impl FeeEstimator {
                     added_dt,
                     expected_dt,
                 };
-                self.testset.write().pending.insert(tx.hash(), record);
+                self.testset.pending.insert(tx.hash(), record);
             } else {
                 log::trace!("new-tx: no suitable fee rate");
             }
         }
     }
 
-    fn commit_block(&self, block: &types::Block) {
+    fn commit_block(&mut self, block: &types::Block) {
         let current_dt = block.seen_dt();
-        self.testset.write().expire(current_dt);
-        self.testset.write().confirm(block);
-        let (success_cnt, failure_cnt) = self.testset.read().score();
+        self.testset.expire(current_dt);
+        self.testset.confirm(block);
+        let (success_cnt, failure_cnt) = self.testset.score();
         let total = success_cnt + failure_cnt;
         let accuracy = f64::from(success_cnt as u32) / f64::from(total as u32);
         log::trace!("accuracy: {:.2} (total: {})", accuracy, total);

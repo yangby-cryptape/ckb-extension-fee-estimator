@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use parking_lot::RwLock;
 
@@ -11,7 +11,7 @@ use crate::{
 pub(crate) struct Shared {
     runtime: Runtime,
     statistics: Arc<RwLock<Statistics>>,
-    estimators: HashMap<String, FeeEstimatorController>,
+    estimators: FeeEstimatorController,
 }
 
 impl Shared {
@@ -19,7 +19,7 @@ impl Shared {
         _args: &Arguments,
         rt: &Runtime,
         stats: &Arc<RwLock<Statistics>>,
-        estimators: HashMap<String, FeeEstimatorController>,
+        estimators: FeeEstimatorController,
     ) -> Result<Shared> {
         let runtime = rt.clone();
         let statistics = Arc::clone(&stats);
@@ -35,18 +35,12 @@ impl Shared {
     }
 
     pub(crate) fn submit_transaction(&self, tx: types::Transaction) {
-        for (name, estimator) in &self.estimators {
-            log::trace!("submit transaction to {}", name);
-            estimator.submit_transaction(tx.clone());
-        }
+        self.estimators.submit_transaction(tx.clone());
         self.statistics.write().submit_transaction(&tx);
     }
 
     pub(crate) fn commit_block(&self, block: types::Block) {
-        for (name, estimator) in &self.estimators {
-            log::trace!("commit block to {}", name);
-            estimator.commit_block(block.clone())
-        }
+        self.estimators.commit_block(block.clone());
         self.statistics.write().commit_block(&block);
     }
 }

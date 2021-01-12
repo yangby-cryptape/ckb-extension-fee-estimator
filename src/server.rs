@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::net::SocketAddr;
 
 use jsonrpc_core::{IoHandler, Result as JsonRpcResult};
 use jsonrpc_derive::rpc;
@@ -8,13 +8,13 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::{
-    error::{Error, Result, RpcError},
+    error::{Error, Result},
     estimators::FeeEstimatorController,
     types::FeeRate,
 };
 
 pub(crate) struct FeeRateRpcImpl {
-    estimators: HashMap<String, FeeEstimatorController>,
+    estimators: FeeEstimatorController,
 }
 
 #[derive(Deserialize)]
@@ -33,20 +33,13 @@ pub trait FeeRateRpc {
 
 impl FeeRateRpc for FeeRateRpcImpl {
     fn estimate_fee_rate(&self, params: EstimateParams) -> JsonRpcResult<Option<FeeRate>> {
-        if let Some(controller) = self.estimators.get(&params.algorithm) {
-            controller
-                .estimate_fee_rate(params.inputs)
-                .map_err(Into::into)
-        } else {
-            Err(RpcError::other(format!("no such algorithm `{}`", &params.algorithm)).into())
-        }
+        self.estimators
+            .estimate_fee_rate(&params.algorithm, params.inputs)
+            .map_err(Into::into)
     }
 }
 
-pub(crate) fn initialize(
-    addr: SocketAddr,
-    estimators: HashMap<String, FeeEstimatorController>,
-) -> Result<Server> {
+pub(crate) fn initialize(addr: SocketAddr, estimators: FeeEstimatorController) -> Result<Server> {
     log::trace!("initialize a HTTP JSON-RPC server ...");
     let mut io_handler = IoHandler::new();
     let rpc_impl = FeeRateRpcImpl { estimators };

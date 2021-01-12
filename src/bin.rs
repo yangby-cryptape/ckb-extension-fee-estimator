@@ -18,8 +18,8 @@ fn main() -> anyhow::Result<()> {
     log::debug!("CKB Fee Estimator service is starting ...");
 
     let args = arguments::Arguments::load()?;
-    let service = service::Service::start(&args).unwrap();
-    service.wait();
+    let service = service::Service::start(&args)?;
+    service.wait()?;
 
     log::debug!("CKB Fee Estimator service has been shutdown.");
     Ok(())

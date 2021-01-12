@@ -1,43 +1,57 @@
-use std::collections::HashMap;
+use std::sync::Arc;
 
 use jsonrpc_http_server::Server;
+use tokio::sync::Notify;
 
 use crate::{
-    arguments::Arguments, error::Result, estimators, runtime, server, shared::Shared,
-    statistics::Statistics, subscriber::Subscriber,
+    arguments::Arguments, error::Result, estimators::FeeEstimatorController, runtime::Runtime,
+    server, shared::Shared, statistics::Statistics, subscriber::Subscriber,
 };
 
 pub(crate) struct Service {
-    server: Server,
+    _server: Server,
     _subscriber: Subscriber,
+    runtime: Runtime,
 }
 
 impl Service {
     pub(crate) fn start(args: &Arguments) -> Result<Service> {
-        let rt = runtime::initialize(args)?;
+        let runtime = crate::runtime::initialize(args)?;
         let stats = Statistics::new(60 * 24 * 2);
-        let estimators_map = {
-            let mut estimators_map = HashMap::new();
-            let controller =
-                estimators::vbytes_flow::FeeEstimator::new(1_000, 60 * 24, &rt, &stats).spawn();
-            estimators_map.insert("vbytes-flow".to_owned(), controller);
-            let controller =
-                estimators::confirmation_fraction::FeeEstimator::new(&rt, &stats).spawn();
-            estimators_map.insert("confirmation-fraction".to_owned(), controller);
-            estimators_map
-        };
-        let shared = Shared::initialize(args, &rt, &stats, estimators_map.clone())?;
-        let server = server::initialize(args.listen_addr(), estimators_map)?;
+        let estimators = FeeEstimatorController::initialize(&runtime, &stats);
+        let shared = Shared::initialize(args, &runtime, &stats, estimators.clone())?;
+        let _server = server::initialize(args.listen_addr(), estimators)?;
         let _subscriber = Subscriber::initialize(args.subscribe_addr(), shared)?;
         let service = Service {
-            server,
+            _server,
             _subscriber,
+            runtime,
         };
         Ok(service)
     }
 
-    pub(crate) fn wait(self) {
-        log::info!("service is blocking");
-        self.server.wait();
+    pub(crate) fn wait(self) -> Result<()> {
+        log::info!("service is blocking ...");
+
+        {
+            let notify = Arc::new(Notify::new());
+            {
+                let notify = Arc::clone(&notify);
+                ctrlc::set_handler(move || {
+                    log::trace!("capture the ctrl-c event");
+                    notify.notify_one();
+                })?;
+            }
+            log::debug!("service is waiting for ctrl-c ...");
+            {
+                self.runtime.block_on(async {
+                    notify.notified().await;
+                });
+            }
+        }
+
+        log::info!("service is exiting ...");
+
+        Ok(())
     }
 }

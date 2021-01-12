@@ -1,7 +1,5 @@
 //! TODO CKB should expose the follow constants, structs, enumerated types and methods.
 
-use serde::{Deserialize, Serialize};
-
 pub(crate) const DEFAULT_BYTES_PER_CYCLES: f64 = 0.000_170_571_4_f64;
 
 const TWO_IN_TWO_OUT_CYCLES: u64 = 3_500_000;
@@ -17,12 +15,4 @@ pub(crate) fn get_transaction_virtual_bytes(tx_size: usize, cycles: u64) -> u64 
         tx_size as u64,
         (cycles as f64 * DEFAULT_BYTES_PER_CYCLES) as u64,
     )
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Topic {
-    NewTipHeader,
-    NewTipBlock,
-    NewTransaction,
 }

@@ -1,4 +1,5 @@
 use std::{
+    cmp,
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
@@ -12,18 +13,15 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 
-use super::{FeeEstimatorController, FeeEstimatorParams, FeeEstimatorResult};
-use crate::{patches, runtime::Runtime, statistics::Statistics, types};
+use crate::{
+    error::{RpcError, RpcResult},
+    patches,
+    runtime::Runtime,
+    statistics::Statistics,
+    types,
+};
 
-/// The number of blocks that the esitmator will trace the statistics.
-const MAX_CONFIRM_BLOCKS: usize = 1000;
-const MIN_BUCKET_FEERATE: f64 = 1000f64;
-const MAX_BUCKET_FEERATE: f64 = 1e7;
-const FEE_SPACING: f64 = 1.05f64;
-const MIN_ESTIMATE_SAMPLES: usize = 20;
-const MIN_ESTIMATE_CONFIRM_RATE: f64 = 0.85f64;
-/// half life each 100 blocks, math.exp(math.log(0.5) / 100)
-const DEFAULT_DECAY_FACTOR: f64 = 0.993;
+const NAME: &str = "confirmation-fraction";
 
 #[derive(Default, Debug, Clone)]
 struct BucketStat {
@@ -44,6 +42,7 @@ struct BucketStat {
 /// For estimate, we loop through each bucket, calculate the confirmed txs rate, until meet the required_confirm_rate.
 #[derive(Clone)]
 struct TxConfirmStat {
+    min_fee_rate: FeeRate,
     /// per bucket stat
     bucket_stats: Vec<BucketStat>,
     /// bucket upper bound fee_rate => bucket index
@@ -97,17 +96,21 @@ impl BucketStat {
     }
 
     // get average fee rate from a bucket
-    fn avg_fee_rate(&self) -> FeeRate {
+    fn avg_fee_rate(&self) -> Option<FeeRate> {
         if self.txs_count > 0f64 {
-            FeeRate::from_u64(((self.total_fee_rate.as_u64() as f64) / self.txs_count) as u64)
+            Some(FeeRate::from_u64(
+                ((self.total_fee_rate.as_u64() as f64) / self.txs_count) as u64,
+            ))
         } else {
-            FeeRate::zero()
+            None
         }
     }
 }
 
 impl TxConfirmStat {
     fn new(buckets: &[FeeRate], max_confirm_blocks: usize, decay_factor: f64) -> Self {
+        // max_confirm_blocsk: The number of blocks that the esitmator will trace the statistics.
+        let min_fee_rate = buckets[0];
         let bucket_stats = vec![BucketStat::default(); buckets.len()];
         let confirm_blocks_to_confirmed_txs = vec![vec![0f64; buckets.len()]; max_confirm_blocks];
         let confirm_blocks_to_failed_txs = vec![vec![0f64; buckets.len()]; max_confirm_blocks];
@@ -118,6 +121,7 @@ impl TxConfirmStat {
             .map(|(i, fee_rate)| (*fee_rate, i))
             .collect();
         TxConfirmStat {
+            min_fee_rate,
             bucket_stats,
             fee_rate_to_bucket,
             block_unconfirmed_txs,
@@ -235,7 +239,7 @@ impl TxConfirmStat {
         // A tx need 1 block to propose, then 2 block to get confirmed
         // so at least confirm blocks is 3 blocks.
         if confirm_blocks < 3 || required_samples == 0 {
-            log::warn!(
+            log::debug!(
                 "confirm_blocks(={}) < 3 || required_samples(={}) == 0",
                 confirm_blocks,
                 required_samples
@@ -267,7 +271,7 @@ impl TxConfirmStat {
                     break;
                 } else {
                     // remove sample data of the first bucket in the range, then retry
-                    let stat = self.bucket_stats.get(start_bucket_index).expect("exists");
+                    let stat = &self.bucket_stats[start_bucket_index];
                     confirmed_txs -= self.confirm_blocks_to_confirmed_txs[confirm_blocks - 1]
                         [start_bucket_index];
                     failure_count -=
@@ -286,54 +290,55 @@ impl TxConfirmStat {
             }
         }
 
-        if !find_best {
-            log::warn!("did not find the best bucket");
-            return None;
-        }
+        if find_best {
+            let best_range_txs_count: f64 = self.bucket_stats[best_bucket_start..=best_bucket_end]
+                .iter()
+                .map(|b| b.txs_count)
+                .sum();
 
-        let best_range_txs_count: f64 = self.bucket_stats[best_bucket_start..=best_bucket_end]
-            .iter()
-            .map(|b| b.txs_count)
-            .sum();
-
-        // find median bucket
-        if best_range_txs_count != 0f64 {
-            let mut half_count = best_range_txs_count / 2f64;
-            for bucket in &self.bucket_stats[best_bucket_start..=best_bucket_end] {
-                // find the median bucket
-                if bucket.txs_count >= half_count {
-                    return Some(bucket.avg_fee_rate());
-                } else {
-                    half_count -= bucket.txs_count;
+            // find median bucket
+            if best_range_txs_count != 0f64 {
+                let mut half_count = best_range_txs_count / 2f64;
+                for bucket in &self.bucket_stats[best_bucket_start..=best_bucket_end] {
+                    // find the median bucket
+                    if bucket.txs_count >= half_count {
+                        return bucket
+                            .avg_fee_rate()
+                            .map(|fee_rate| cmp::max(fee_rate, self.min_fee_rate));
+                    } else {
+                        half_count -= bucket.txs_count;
+                    }
                 }
             }
+            log::trace!("no best fee rate");
+        } else {
+            log::trace!("no best bucket");
         }
 
-        log::warn!("did not find the best fee rate");
         None
-    }
-}
-
-impl Default for Estimator {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
 impl Estimator {
     /// Creates a new estimator.
-    fn new() -> Self {
+    fn new(
+        max_confirm_blocks: usize,
+        min_bucket_feerate: f64,
+        max_bucket_feerate: f64,
+        fee_spacing: f64,
+        decay_factor: f64,
+    ) -> Self {
         let mut buckets = Vec::new();
-        let mut bucket_fee_boundary = MIN_BUCKET_FEERATE;
+        let mut bucket_fee_boundary = min_bucket_feerate;
         // initialize fee_rate buckets
-        while bucket_fee_boundary <= MAX_BUCKET_FEERATE {
+        while bucket_fee_boundary <= max_bucket_feerate {
             buckets.push(FeeRate::from_u64(bucket_fee_boundary as u64));
-            bucket_fee_boundary *= FEE_SPACING;
+            bucket_fee_boundary *= fee_spacing;
         }
         Estimator {
             best_height: 0,
             start_height: 0,
-            tx_confirm_stat: TxConfirmStat::new(&buckets, MAX_CONFIRM_BLOCKS, DEFAULT_DECAY_FACTOR),
+            tx_confirm_stat: TxConfirmStat::new(&buckets, max_confirm_blocks, decay_factor),
             tracked_txs: Default::default(),
         }
     }
@@ -365,7 +370,7 @@ impl Estimator {
         if self.start_height == 0 && processed_txs > 0 {
             // start record
             self.start_height = self.best_height;
-            log::debug!("Fee estimator start recording at {}", self.start_height);
+            log::debug!("start recording at {}", self.start_height);
         }
     }
 
@@ -411,11 +416,16 @@ impl Estimator {
     */
 
     /// estimate a fee rate for confirm target
-    fn estimate(&self, expect_confirm_blocks: usize) -> Option<FeeRate> {
+    fn estimate(
+        &self,
+        expect_confirm_blocks: usize,
+        min_estimate_samples: usize,
+        min_estimate_confirm_rate: f64,
+    ) -> Option<FeeRate> {
         self.tx_confirm_stat.estimate_median(
             expect_confirm_blocks,
-            MIN_ESTIMATE_SAMPLES,
-            MIN_ESTIMATE_CONFIRM_RATE,
+            min_estimate_samples,
+            min_estimate_confirm_rate,
         )
     }
 }
@@ -489,43 +499,58 @@ mod tests {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub(crate) struct Params {
-    expect_confirm_blocks: usize,
+struct Params {
+    probability: f32,
+    target_blocks: u32,
 }
 
 /// Confirmation Fraction Fee Estimator
 ///
 /// Copy from https://github.com/nervosnetwork/ckb/tree/v0.39.1/util/fee-estimator
 /// Ref: https://github.com/nervosnetwork/ckb/pull/1659
-#[derive(Clone)]
-pub(crate) struct FeeEstimator {
-    kernel: Arc<RwLock<Estimator>>,
-    runtime: Runtime,
+pub(in crate::estimators) struct FeeEstimator {
+    min_samples: usize,
+    kernel: Estimator,
     statistics: Arc<RwLock<Statistics>>,
 }
 
 impl FeeEstimator {
-    pub(crate) fn new(rt: &Runtime, stats: &Arc<RwLock<Statistics>>) -> Self {
+    pub(in crate::estimators) fn new_controller(
+        max_confirm_blocks: usize,
+        min_samples: usize,
+        min_bucket_feerate: f64,
+        max_bucket_feerate: f64,
+        fee_spacing: f64,
+        rt: &Runtime,
+        stats: &Arc<RwLock<Statistics>>,
+    ) -> super::Controller {
+        // half life each 100 blocks, math.exp(math.log(0.5) / 100)
+        let default_decay_factor: f64 = (0.5f64.ln() / 100.0).exp();
+        let kernel = Estimator::new(
+            max_confirm_blocks,
+            min_bucket_feerate,
+            max_bucket_feerate,
+            fee_spacing,
+            default_decay_factor,
+        );
         Self {
-            kernel: Default::default(),
-            runtime: rt.clone(),
+            min_samples,
+            kernel,
             statistics: Arc::clone(stats),
         }
+        .spawn(rt)
     }
 
-    pub(crate) fn spawn(self) -> FeeEstimatorController {
-        let (sender, mut receiver) = mpsc::channel::<(
-            FeeEstimatorParams,
-            Option<oneshot::Sender<FeeEstimatorResult>>,
-        )>(100);
-        let runtime = self.runtime.clone();
+    fn spawn(self, rt: &Runtime) -> super::Controller {
+        let (sender, mut receiver) =
+            mpsc::channel::<(super::Params, Option<oneshot::Sender<super::Result>>)>(100);
+        let runtime = rt.clone();
         runtime.spawn(async move {
-            let estimator = self;
+            let mut estimator = self;
             loop {
                 select! {
                     Some((message, sender1_opt)) = receiver.recv() => {
-                        let estimator_clone= estimator.clone();
-                        let resp = estimator_clone.process(message).await;
+                        let resp = estimator.process(message).await;
                         if let Some(sender1) = sender1_opt {
                             let _ = sender1.send(resp);
                         }
@@ -534,53 +559,89 @@ impl FeeEstimator {
                 }
             }
         });
-        FeeEstimatorController { runtime, sender }
+        super::Controller {
+            name: NAME,
+            runtime,
+            sender,
+        }
     }
 
-    async fn process(&self, msg: FeeEstimatorParams) -> FeeEstimatorResult {
+    async fn process(&mut self, msg: super::Params) -> super::Result {
         log::trace!("process {} message", msg);
         match msg {
-            FeeEstimatorParams::Estimate(value) => match serde_json::from_value(value) {
+            super::Params::Estimate(value) => match serde_json::from_value(value) {
                 Ok(params) => {
-                    let fee_rate_opt = self.estimate(&params);
-                    FeeEstimatorResult::Estimate(Ok(fee_rate_opt))
+                    if let Err(err) = self.check_estimate_params(&params) {
+                        super::Result::Estimate(Err(err))
+                    } else {
+                        let fee_rate_opt = self.estimate(&params);
+                        super::Result::Estimate(Ok(fee_rate_opt))
+                    }
                 }
-                Err(err) => FeeEstimatorResult::Estimate(Err(err.into())),
+                Err(err) => super::Result::Estimate(Err(err.into())),
             },
-            FeeEstimatorParams::NewTransaction(tx) => {
+            super::Params::NewTransaction(tx) => {
                 self.submit_transaction(&tx);
-                FeeEstimatorResult::NoReturn
+                super::Result::NoReturn
             }
-            FeeEstimatorParams::NewBlock(block) => {
+            super::Params::NewBlock(block) => {
                 self.commit_block(&block);
-                FeeEstimatorResult::NoReturn
+                super::Result::NoReturn
             }
         }
     }
 }
 
 impl FeeEstimator {
-    pub(crate) fn estimate(&self, params: &Params) -> Option<u64> {
+    fn check_estimate_params(&self, params: &Params) -> RpcResult<()> {
+        let max_confirm_blocks = self.kernel.tx_confirm_stat.max_confirms();
+        if params.probability < 0.000_001 {
+            return Err(RpcError::invalid_params(
+                "probability should not less than 0.000_001",
+            ));
+        }
+        if params.probability > 0.999_999 {
+            return Err(RpcError::invalid_params(
+                "probability should not greater than 0.999_999",
+            ));
+        }
+        if params.target_blocks < 3 {
+            return Err(RpcError::invalid_params(
+                "target blocks should not less than 3 blocks",
+            ));
+        }
+        if params.target_blocks as usize > max_confirm_blocks {
+            return Err(RpcError::invalid_params(format!(
+                "target blocks should not greater than {}",
+                max_confirm_blocks
+            )));
+        }
+        Ok(())
+    }
+
+    fn estimate(&self, params: &Params) -> Option<u64> {
         self.kernel
-            .read()
-            .estimate(params.expect_confirm_blocks)
+            .estimate(
+                params.target_blocks as usize,
+                self.min_samples,
+                f64::from(params.probability),
+            )
             .map(FeeRate::as_u64)
     }
 }
 
 impl FeeEstimator {
-    fn submit_transaction(&self, tx: &types::Transaction) {
+    fn submit_transaction(&mut self, tx: &types::Transaction) {
         let vbytes = patches::get_transaction_virtual_bytes(tx.size() as usize, tx.cycles());
         let fee_rate = FeeRate::calculate(Capacity::shannons(tx.fee()), vbytes as usize);
         self.kernel
-            .write()
             .track_tx(tx.hash(), fee_rate, self.statistics.read().current_number());
     }
 
-    fn commit_block(&self, block: &types::Block) {
-        self.kernel.write().process_block(
+    fn commit_block(&mut self, block: &types::Block) {
+        self.kernel.process_block(
             block.number(),
             block.tx_hashes().iter().map(ToOwned::to_owned),
-        )
+        );
     }
 }

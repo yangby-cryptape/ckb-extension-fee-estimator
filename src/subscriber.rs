@@ -1,5 +1,6 @@
-use std::{net::SocketAddr, result::Result as StdResult, str::FromStr as _};
+use std::{net::SocketAddr, str::FromStr as _};
 
+use ckb_jsonrpc_types as rpc;
 use futures::{
     compat::{Future01CompatExt as _, Sink01CompatExt as _, Stream01CompatExt as _},
     future, StreamExt as _,
@@ -14,7 +15,6 @@ use jsonrpc_server_utils::{
 
 use crate::{
     error::{Error, Result},
-    patches::Topic,
     shared::Shared,
     types,
 };
@@ -26,7 +26,7 @@ pub trait SubscriptionRpc {
     type Metadata;
 
     #[pubsub(subscription = "subscribe", subscribe, name = "subscribe")]
-    fn subscribe(&self, meta: Self::Metadata, subscriber: Subscriber<String>, topic: Topic);
+    fn subscribe(&self, meta: Self::Metadata, subscriber: Subscriber<String>, topic: rpc::Topic);
     #[pubsub(subscription = "subscribe", unsubscribe, name = "unsubscribe")]
     fn unsubscribe(&self, meta: Option<Self::Metadata>, id: SubscriptionId) -> Result<bool>;
 }
@@ -56,22 +56,30 @@ impl Subscriber {
         let subscribe_tip_block = {
             let shared = shared.clone();
             let mut stream = client
-                .subscribe(Topic::NewTipBlock)
+                .subscribe(rpc::Topic::NewTipBlock)
                 .map_err(Error::subscriber)?;
             async move {
-                while let Some(Ok(s)) = stream.next().await {
-                    let _result = Self::handle_tip_block(shared.clone(), s);
+                while let Some(res) = stream.next().await {
+                    if let Ok(s) = res {
+                        Self::handle_tip_block(shared.clone(), s);
+                    } else {
+                        log::error!("tip_block stream return error");
+                    }
                 }
             }
         };
         let subscribe_transaction = {
             let shared = shared.clone();
             let mut stream = client
-                .subscribe(Topic::NewTransaction)
+                .subscribe(rpc::Topic::NewTransaction)
                 .map_err(Error::subscriber)?;
             async move {
-                while let Some(Ok(s)) = stream.next().await {
-                    let _result = Self::handle_transaction(shared.clone(), s);
+                while let Some(res) = stream.next().await {
+                    if let Ok(s) = res {
+                        Self::handle_transaction(shared.clone(), s);
+                    } else {
+                        log::error!("transaction stream return error");
+                    }
                 }
             }
         };
@@ -82,25 +90,23 @@ impl Subscriber {
         Ok(client)
     }
 
-    fn handle_tip_block(shared: Shared, block: String) -> StdResult<(), JsonRpcRpcError> {
+    fn handle_tip_block(shared: Shared, block: String) {
         log::trace!("receive tip block");
         if let Ok(block) = types::Block::from_str(&block) {
-            log::trace!(">>> tip block {:#x}", block.hash());
+            log::trace!(">>> tip block#{} {:#x}", block.number(), block.hash());
             shared.commit_block(block);
         } else {
-            log::warn!("failed to deserialize tip block");
+            log::error!("failed to deserialize tip block");
         }
-        Ok(())
     }
 
-    fn handle_transaction(shared: Shared, tx: String) -> StdResult<(), JsonRpcRpcError> {
+    fn handle_transaction(shared: Shared, tx: String) {
         log::trace!("receive transaction");
         if let Ok(tx) = types::Transaction::from_str(&tx) {
             log::trace!(">>> transaction {:#x}", tx.hash());
             shared.submit_transaction(tx);
         } else {
-            log::warn!("failed to deserialize transaction");
+            log::error!("failed to deserialize transaction");
         }
-        Ok(())
     }
 }

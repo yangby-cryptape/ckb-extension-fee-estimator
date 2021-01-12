@@ -35,7 +35,8 @@ impl BlockTable {
         let block_dt = Duration::from_millis(block.timestamp());
         let hash = block.hash();
         log::trace!(
-            "insert block {:#x} ({}) into statistics",
+            "insert block#{} {:#x} ({}) into statistics",
+            block.number(),
             hash,
             block_dt.pretty()
         );

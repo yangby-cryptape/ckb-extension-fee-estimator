@@ -22,7 +22,7 @@ impl Shared {
         estimators: FeeEstimatorController,
     ) -> Result<Shared> {
         let runtime = rt.clone();
-        let statistics = Arc::clone(&stats);
+        let statistics = Arc::clone(stats);
         Ok(Self {
             runtime,
             statistics,

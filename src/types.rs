@@ -46,7 +46,7 @@ impl From<rpc::BlockView> for Block {
 impl FromStr for Block {
     type Err = serde_json::Error;
     fn from_str(s: &str) -> StdResult<Self, Self::Err> {
-        serde_json::from_str::<rpc::BlockView>(&s).map(From::from)
+        serde_json::from_str::<rpc::BlockView>(s).map(From::from)
     }
 }
 
@@ -92,7 +92,7 @@ impl From<rpc::PoolTransactionEntry> for Transaction {
 impl FromStr for Transaction {
     type Err = serde_json::Error;
     fn from_str(s: &str) -> StdResult<Self, Self::Err> {
-        serde_json::from_str::<rpc::PoolTransactionEntry>(&s).map(From::from)
+        serde_json::from_str::<rpc::PoolTransactionEntry>(s).map(From::from)
     }
 }
 

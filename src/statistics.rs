@@ -114,7 +114,7 @@ impl TransactionTable {
     }
 
     pub(crate) fn remove(&mut self, hash: &Byte32) -> Option<types::Transaction> {
-        let tx_opt = self.data.remove(&hash);
+        let tx_opt = self.data.remove(hash);
         let ts_idx_opt = self
             .ts2hash_index
             .iter()

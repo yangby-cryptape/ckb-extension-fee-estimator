@@ -9,7 +9,7 @@ defaults:
     shell: bash
 env:
   CARGO_TERM_COLOR: always
-  RUSTFLAGS: -F warnings
+  RUSTFLAGS: -D warnings
   RUST_BACKTRACE: full
 jobs:
   rustfmt:

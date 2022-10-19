@@ -45,7 +45,7 @@ impl fmt::Display for Params {
 
 impl Controller {
     pub(super) fn name(&self) -> &'static str {
-        &self.name
+        self.name
     }
 
     pub(super) fn estimate_fee_rate(&self, inputs: Value) -> RpcResult<Option<types::FeeRate>> {

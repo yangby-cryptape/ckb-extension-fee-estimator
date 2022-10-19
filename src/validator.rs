@@ -59,7 +59,7 @@ where
     pub(crate) fn expire(&mut self, current: T) {
         let mut failure = Vec::new();
         for hash in self.predictions.keys() {
-            let expected = self.predictions.get(&hash).unwrap().expected;
+            let expected = self.predictions.get(hash).unwrap().expected;
             if current > expected {
                 failure.push(hash.to_owned());
             }
@@ -73,7 +73,7 @@ where
     pub(crate) fn confirm(&mut self, block: &types::Block) {
         let mut success = Vec::new();
         for hash in block.tx_hashes() {
-            if self.predictions.contains_key(&hash) {
+            if self.predictions.contains_key(hash) {
                 success.push(hash.to_owned());
             }
         }

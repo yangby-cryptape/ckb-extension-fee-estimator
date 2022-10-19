@@ -55,12 +55,12 @@ impl Subscriber {
                     if let Ok(s) = res {
                         Self::handle_tip_block(shared.clone(), s);
                     } else {
-                        log::error!("tip_block stream return error");
+                        log::error!("tip block stream return error");
                     }
                 }
             }
         };
-        let subscribe_transaction = {
+        let subscribe_new_transaction = {
             let shared = shared.clone();
             let mut stream = client
                 .subscribe(rpc::Topic::NewTransaction)
@@ -68,16 +68,32 @@ impl Subscriber {
             async move {
                 while let Some(res) = stream.next().await {
                     if let Ok(s) = res {
-                        Self::handle_transaction(shared.clone(), s);
+                        Self::handle_new_transaction(shared.clone(), s);
                     } else {
-                        log::error!("transaction stream return error");
+                        log::error!("new transaction stream return error");
+                    }
+                }
+            }
+        };
+        let subscribe_rejected_transaction = {
+            let shared = shared.clone();
+            let mut stream = client
+                .subscribe(rpc::Topic::RejectedTransaction)
+                .map_err(Error::subscriber)?;
+            async move {
+                while let Some(res) = stream.next().await {
+                    if let Ok(s) = res {
+                        Self::handle_rejected_transaction(shared.clone(), s);
+                    } else {
+                        log::error!("rejected transaction stream return error");
                     }
                 }
             }
         };
         shared.runtime().spawn(rpc_client);
         shared.runtime().spawn(subscribe_tip_block);
-        shared.runtime().spawn(subscribe_transaction);
+        shared.runtime().spawn(subscribe_new_transaction);
+        shared.runtime().spawn(subscribe_rejected_transaction);
         let client = Subscriber;
         Ok(client)
     }
@@ -92,13 +108,27 @@ impl Subscriber {
         }
     }
 
-    fn handle_transaction(shared: Shared, tx: String) {
-        log::trace!("receive transaction");
+    fn handle_new_transaction(shared: Shared, tx: String) {
+        log::trace!("receive new transaction");
         if let Ok(tx) = types::Transaction::from_str(&tx) {
-            log::trace!(">>> transaction {:#x}", tx.hash());
+            log::trace!(">>> new transaction {:#x}", tx.hash());
             shared.submit_transaction(tx);
         } else {
-            log::error!("failed to deserialize transaction");
+            log::error!("failed to deserialize new transaction");
+        }
+    }
+
+    fn handle_rejected_transaction(shared: Shared, rtx: String) {
+        log::trace!("receive rejected transaction");
+        if let Ok(tx) = types::RejectedTransaction::from_str(&rtx) {
+            log::trace!(
+                ">>> reject transaction {:#x} since {}",
+                tx.hash(),
+                tx.reason()
+            );
+            shared.reject_transaction(tx);
+        } else {
+            log::error!("failed to deserialize rejected transaction");
         }
     }
 }

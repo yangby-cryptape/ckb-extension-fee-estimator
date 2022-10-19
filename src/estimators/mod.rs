@@ -60,4 +60,11 @@ impl FeeEstimatorController {
             estimator.commit_block(block.clone())
         }
     }
+
+    pub(crate) fn reject_transaction(&self, tx: types::RejectedTransaction) {
+        for (name, estimator) in self.estimators.iter() {
+            log::trace!("reject transaction to {}", name);
+            estimator.reject_transaction(tx.clone())
+        }
+    }
 }

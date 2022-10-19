@@ -19,6 +19,7 @@ enum Params {
     Estimate(Value),
     NewTransaction(types::Transaction),
     NewBlock(types::Block),
+    RejectTransaction(types::RejectedTransaction),
 }
 
 #[derive(Debug)]
@@ -39,6 +40,7 @@ impl fmt::Display for Params {
             Self::Estimate(_) => "Estimate",
             Self::NewTransaction(_) => "NewTransaction",
             Self::NewBlock(_) => "NewBlock",
+            Self::RejectTransaction(_) => "RejectTransaction",
         };
         write!(f, "{}", name)
     }
@@ -81,6 +83,14 @@ impl Controller {
     pub(super) fn commit_block(&self, block: types::Block) {
         let sender = self.sender.clone();
         let inputs = Params::NewBlock(block);
+        if let Err(err) = sender.try_send((inputs, None)) {
+            log::error!("failed to send a message since {}", err);
+        }
+    }
+
+    pub(crate) fn reject_transaction(&self, tx: types::RejectedTransaction) {
+        let sender = self.sender.clone();
+        let inputs = Params::RejectTransaction(tx);
         if let Err(err) = sender.try_send((inputs, None)) {
             log::error!("failed to send a message since {}", err);
         }

@@ -83,6 +83,19 @@ where
         }
     }
 
+    pub(crate) fn reject(&mut self, tx: &types::RejectedTransaction) {
+        if self.predictions.contains_key(&tx.hash()) {
+            if tx.is_invalid() {
+                log::trace!("reject-tx: remove since reason is{}", tx.reason());
+                self.predictions.remove(&tx.hash()).unwrap();
+            } else {
+                log::trace!("reject-tx: keep   since reason is {}", tx.reason());
+            }
+        } else {
+            log::trace!("reject-tx: doesn't have this transaction {:#x}", tx.hash());
+        }
+    }
+
     pub(crate) fn score(&self, after_dt_opt: Option<Duration>) -> (usize, usize) {
         if let Some(after_dt) = after_dt_opt {
             let f = |vec: &[Duration]| vec.iter().filter(|added_dt| *added_dt >= &after_dt).count();

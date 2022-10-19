@@ -43,4 +43,9 @@ impl Shared {
         self.estimators.commit_block(block.clone());
         self.statistics.write().commit_block(&block);
     }
+
+    pub(crate) fn reject_transaction(&self, tx: types::RejectedTransaction) {
+        self.estimators.reject_transaction(tx.clone());
+        self.statistics.write().reject_transaction(&tx);
+    }
 }

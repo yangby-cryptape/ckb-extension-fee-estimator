@@ -408,12 +408,10 @@ impl Estimator {
         })
     }
 
-    /* TODO
     /// tx removed from txpool
     fn drop_tx(&mut self, tx_hash: &Byte32) -> bool {
         self.drop_tx_inner(tx_hash, true).is_some()
     }
-    */
 
     /// estimate a fee rate for confirm target
     fn estimate(
@@ -586,6 +584,10 @@ impl FeeEstimator {
                 self.commit_block(&block);
                 super::Result::NoReturn
             }
+            super::Params::RejectTransaction(tx) => {
+                self.reject_transaction(&tx);
+                super::Result::NoReturn
+            }
         }
     }
 }
@@ -676,5 +678,12 @@ impl FeeEstimator {
         self.validator.expire(current_number);
         self.validator.confirm(block);
         self.validator.trace_score();
+    }
+
+    fn reject_transaction(&mut self, tx: &types::RejectedTransaction) {
+        if tx.is_invalid() {
+            self.kernel.drop_tx(&tx.hash());
+        }
+        self.validator.reject(tx);
     }
 }

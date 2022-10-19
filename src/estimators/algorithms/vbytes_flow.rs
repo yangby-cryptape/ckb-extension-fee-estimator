@@ -4,7 +4,10 @@ use std::{
     time::Duration,
 };
 
-use ckb_types::core::{Capacity, FeeRate};
+use ckb_types::{
+    core::{Capacity, FeeRate},
+    packed::Byte32,
+};
 use parking_lot::RwLock;
 use serde::Deserialize;
 use statrs::distribution::{DiscreteCDF as _, Poisson};
@@ -40,6 +43,7 @@ pub(crate) struct TxStatus {
 
 #[derive(Debug, Clone)]
 pub(crate) struct TxAdded {
+    pub(crate) hash: Byte32,
     pub(crate) status: TxStatus,
     pub(crate) added_dt: Duration,
 }
@@ -82,8 +86,9 @@ impl Ord for TxStatus {
 }
 
 impl TxAdded {
-    pub(crate) fn new(vbytes: usize, fee_rate: FeeRate, added_dt: Duration) -> Self {
+    pub(crate) fn new(hash: Byte32, vbytes: usize, fee_rate: FeeRate, added_dt: Duration) -> Self {
         Self {
+            hash,
             status: TxStatus::new(vbytes, fee_rate),
             added_dt,
         }
@@ -93,6 +98,10 @@ impl TxAdded {
 impl TxAddedQue {
     fn add_transaction(&mut self, tx: TxAdded) {
         self.0.push_front(tx);
+    }
+
+    fn remove_transaction(&mut self, tx_hash: &Byte32) {
+        self.0.retain(|tx| tx.hash != *tx_hash);
     }
 
     fn expire(&mut self, expired_dt: Duration) -> usize {
@@ -459,6 +468,10 @@ impl FeeEstimator {
                 self.commit_block(&block);
                 super::Result::NoReturn
             }
+            super::Params::RejectTransaction(tx) => {
+                self.reject_transaction(&tx);
+                super::Result::NoReturn
+            }
         }
     }
 }
@@ -509,7 +522,7 @@ impl FeeEstimator {
         let expired_dt = current_dt - Self::historical_dur(self.max_target_dur);
         let vbytes = patches::get_transaction_virtual_bytes(tx.size() as usize, tx.cycles());
         let fee_rate = FeeRate::calculate(Capacity::shannons(tx.fee()), vbytes as usize);
-        let new_tx = TxAdded::new(vbytes as usize, fee_rate, current_dt);
+        let new_tx = TxAdded::new(tx.hash(), vbytes as usize, fee_rate, current_dt);
         self.txs.add_transaction(new_tx);
         self.txs.expire(expired_dt);
         {
@@ -554,5 +567,12 @@ impl FeeEstimator {
         self.validator.expire(current_dt);
         self.validator.confirm(block);
         self.validator.trace_score();
+    }
+
+    fn reject_transaction(&mut self, tx: &types::RejectedTransaction) {
+        if tx.is_invalid() {
+            self.txs.remove_transaction(&tx.hash());
+        }
+        self.validator.reject(tx);
     }
 }

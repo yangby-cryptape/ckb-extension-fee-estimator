@@ -82,7 +82,15 @@ Follow the [Weight-Units Flow Fee Estimator for Bitcoin](https://bitcoiner.live/
 
 ### `confirmation-fraction`
 
-More details could be found in [this CKB PR](https://github.com/nervosnetwork/ckb/pull/1659).
+More details could be found in [CKB PR 1659](https://github.com/nervosnetwork/ckb/pull/1659).
+
+## Known Issues
+
+- The `confirmation-fraction` algorithm always causes panics.
+
+  I just copied the code from [CKB v0.39.1](https://github.com/nervosnetwork/ckb/tree/v0.39.1/util/fee-estimator) and didn't debug it.
+
+  Please ignore the error logs of the `confirmation-fraction` algorithm.
 
 ## License
 

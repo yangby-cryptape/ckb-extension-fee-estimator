@@ -218,6 +218,13 @@ impl Statistics {
         self.blocks.expire(block_dt, self.lifetime_dur);
     }
 
+    pub(crate) fn reject_transaction(&mut self, tx: &types::RejectedTransaction) {
+        log::trace!("reject transaction into statistics");
+        if tx.is_invalid() {
+            self.txs.remove(&tx.hash());
+        }
+    }
+
     pub(crate) fn filter_transactions<F, C, T>(&self, func_filter: F, func_convert: C) -> Vec<T>
     where
         F: Fn(Duration) -> bool,

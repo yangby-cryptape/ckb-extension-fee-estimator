@@ -3,7 +3,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 
 use crate::{
-    arguments::Arguments, error::Result, estimators::FeeEstimatorController, runtime::Runtime,
+    arguments::Cli, error::Result, estimators::FeeEstimatorController, runtime::Runtime,
     statistics::Statistics, types,
 };
 
@@ -16,7 +16,7 @@ pub(crate) struct Shared {
 
 impl Shared {
     pub(crate) fn initialize(
-        _args: &Arguments,
+        _cli: &Cli,
         rt: &Runtime,
         stats: &Arc<RwLock<Statistics>>,
         estimators: FeeEstimatorController,

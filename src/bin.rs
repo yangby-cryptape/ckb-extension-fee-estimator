@@ -1,3 +1,5 @@
+extern crate time;
+
 mod arguments;
 mod error;
 mod estimators;
@@ -18,7 +20,7 @@ fn main() -> anyhow::Result<()> {
 
     log::debug!("CKB Fee Estimator service is starting ...");
 
-    let args = arguments::Arguments::load()?;
+    let args = arguments::Cli::load()?;
     let service = service::Service::start(&args)?;
     service.wait()?;
 

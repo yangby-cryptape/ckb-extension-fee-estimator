@@ -1,17 +1,11 @@
 use std::{net::SocketAddr, str::FromStr as _};
 
 use ckb_jsonrpc_types as rpc;
-use futures::{
-    compat::{Future01CompatExt as _, Sink01CompatExt as _, Stream01CompatExt as _},
-    future, StreamExt as _,
-};
-use futures01::{Future as _, Sink as _, Stream as _};
+use futures::{future, FutureExt as _, SinkExt as _, StreamExt as _, TryStreamExt as _};
 use jsonrpc_core_client::{transports::duplex, RpcError as JsonRpcRpcError};
 use jsonrpc_derive::rpc;
-use jsonrpc_server_utils::{
-    codecs::StreamCodec,
-    tokio::{codec::Decoder, net::TcpStream},
-};
+use jsonrpc_server_utils::{codecs::StreamCodec, tokio_util::codec::Decoder as _};
+use tokio::net::TcpStream;
 
 use crate::{
     error::{Error, Result},
@@ -35,20 +29,18 @@ impl Subscriber {
     pub(crate) fn initialize(addr: SocketAddr, shared: Shared) -> Result<Self> {
         log::trace!("initialize a subscriber to synchronize transactions ...");
         let fut_conn = TcpStream::connect(&addr).map(|stream| {
-            log::trace!("successfully connect via {}", stream.local_addr().unwrap());
+            let local_addr = stream.as_ref().unwrap().local_addr().unwrap();
+            log::trace!("successfully connect via {}", local_addr);
             stream
         });
         let stream = shared
             .runtime()
-            .block_on(fut_conn.compat())
+            .block_on(fut_conn)
             .map_err(Error::subscriber)?;
         let (sink, stream) = StreamCodec::stream_incoming().framed(stream).split();
-        let sink = sink
-            .sink_map_err(|err| JsonRpcRpcError::Other(Box::new(err)))
-            .sink_compat();
+        let sink = sink.sink_map_err(|err| JsonRpcRpcError::Other(Box::new(err)));
         let stream = stream
             .map_err(|err| JsonRpcRpcError::Other(Box::new(err)))
-            .compat()
             .take_while(|x| future::ready(x.is_ok()))
             .map(|x| x.expect("Stream is closed upon first error."));
         let (rpc_client, sender) = duplex(Box::pin(sink), Box::pin(stream));

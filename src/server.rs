@@ -10,6 +10,7 @@ use serde_json::Value;
 use crate::{
     error::{Error, Result},
     estimators::FeeEstimatorController,
+    runtime::Runtime,
     types::FeeRate,
 };
 
@@ -39,7 +40,11 @@ impl FeeRateRpc for FeeRateRpcImpl {
     }
 }
 
-pub(crate) fn initialize(addr: SocketAddr, estimators: FeeEstimatorController) -> Result<Server> {
+pub(crate) fn initialize(
+    runtime: &Runtime,
+    addr: SocketAddr,
+    estimators: FeeEstimatorController,
+) -> Result<Server> {
     log::trace!("initialize a HTTP JSON-RPC server ...");
     let mut io_handler = IoHandler::new();
     let rpc_impl = FeeRateRpcImpl { estimators };
@@ -49,6 +54,7 @@ pub(crate) fn initialize(addr: SocketAddr, estimators: FeeEstimatorController) -
             AccessControlAllowOrigin::Null,
             AccessControlAllowOrigin::Any,
         ]))
+        .event_loop_executor(runtime.handle().clone())
         .start_http(&addr)
         .map_err(Error::server)
 }

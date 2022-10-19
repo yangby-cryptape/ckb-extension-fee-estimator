@@ -15,30 +15,28 @@ name = "ckb-fee-estimator"
 path = "src/bin.rs"
 
 [dependencies]
-ckb-types = "0.39.1"
-ckb-jsonrpc-types = "0.39.1"
-ckb-fee-estimator = "0.39.1"
+ckb-types = "0.104.1"
+ckb-jsonrpc-types = "0.104.1"
 faketime = "0.2.1"
-anyhow = "1.0.38"
-thiserror = "1.0.23"
-log = "0.4.13"
-env_logger = "0.8.2"
-clap = "2.33.3"
-serde = "1.0.118"
-serde_json = "1.0.61"
-parking_lot = "0.11.1"
-futures01 = { package = "futures", version = "0.1.30" }
-futures = { version = "0.3.9", features = ["compat"] }
-tokio = { version = "1.0.1", features = ["full"] }
-ctrlc = "3.1.7"
-jsonrpc-http-server = "16.0.0"
-jsonrpc-server-utils = "16.0.0"
-jsonrpc-core-client = "16.0.0"
-jsonrpc-derive = "16.0.0"
-jsonrpc-core = "16.0.0"
-jsonrpc-pubsub = "16.0.0"
-time = "0.2.24"
-statrs = "0.13.0"
+anyhow = "1.0.65"
+thiserror = "1.0.37"
+log = "0.4.17"
+env_logger = "0.9.1"
+clap = { version = "4.0.17", features = ["derive"] }
+serde = "1.0.145"
+serde_json = "1.0.86"
+parking_lot = "0.12.1"
+futures = "0.3.24"
+tokio = { version = "1.21.2", features = ["full"] }
+ctrlc = "3.2.3"
+jsonrpc-http-server = "18.0.0"
+jsonrpc-server-utils = "18.0.0"
+jsonrpc-core-client = "18.0.0"
+jsonrpc-derive = "18.0.0"
+jsonrpc-core = "18.0.0"
+jsonrpc-pubsub = "18.0.0"
+time = { version = "0.3.15", features = ["macros", "formatting"] }
+statrs = "0.16.0"
 
 [badges]
 maintenance = { status = "experimental" }

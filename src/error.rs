@@ -1,4 +1,4 @@
-use std::{fmt, result};
+use std::{fmt, result, sync::mpsc::RecvError};
 
 use jsonrpc_core as rpc;
 use thiserror::Error;
@@ -18,7 +18,7 @@ pub(crate) enum Error {
     #[error("serialize error: {0}")]
     Serialize(#[from] ckb_types::error::VerificationError),
     #[error("channel error: {0}")]
-    Receiver(#[from] tokio::sync::oneshot::error::RecvError),
+    Receiver(#[from] RecvError),
 }
 
 #[derive(Error, Debug)]

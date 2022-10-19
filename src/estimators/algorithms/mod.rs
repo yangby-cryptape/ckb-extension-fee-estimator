@@ -1,11 +1,13 @@
-use std::fmt;
+use std::{
+    fmt,
+    sync::mpsc::{sync_channel, SyncSender},
+};
 
 use serde_json::Value;
-use tokio::sync::{mpsc, oneshot};
+use tokio::{sync::mpsc::Sender, task::block_in_place};
 
 use crate::{
     error::{RpcError, RpcResult},
-    runtime::Runtime,
     types,
 };
 
@@ -28,8 +30,7 @@ enum Result {
 #[derive(Clone)]
 pub(super) struct Controller {
     name: &'static str,
-    runtime: Runtime,
-    sender: mpsc::Sender<(Params, Option<oneshot::Sender<self::Result>>)>,
+    sender: Sender<(Params, Option<SyncSender<self::Result>>)>,
 }
 
 impl fmt::Display for Params {
@@ -51,15 +52,15 @@ impl Controller {
     pub(super) fn estimate_fee_rate(&self, inputs: Value) -> RpcResult<Option<types::FeeRate>> {
         log::trace!("estimate fee rate");
         let sender = self.sender.clone();
-        let (sender1, receiver1) = oneshot::channel();
+        let (sender1, receiver1) = sync_channel(1);
         let inputs = Params::Estimate(inputs);
         if let Err(err) = sender.try_send((inputs, Some(sender1))) {
             log::error!("failed to send a message since {}", err);
         }
-        let recv_data = self
-            .runtime
-            .block_on(receiver1)
-            .map_err(|_| RpcError::other("internal error: broken channel"))?;
+        let recv_data = block_in_place(|| receiver1.recv()).map_err(|err| {
+            let errmsg = format!("internal error: broken channel since {}", err);
+            RpcError::other(errmsg)
+        })?;
         if let self::Result::Estimate(res) = recv_data {
             res
         } else {

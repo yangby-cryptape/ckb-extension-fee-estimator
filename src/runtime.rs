@@ -4,13 +4,13 @@ use tokio::runtime::Builder;
 pub(crate) use tokio::runtime::Runtime as RawRuntime;
 
 use crate::{
-    arguments::Arguments,
+    arguments::Cli,
     error::{Error, Result},
 };
 
 pub(crate) type Runtime = Arc<RawRuntime>;
 
-pub(crate) fn initialize(_args: &Arguments) -> Result<Runtime> {
+pub(crate) fn initialize(_cli: &Cli) -> Result<Runtime> {
     Builder::new_multi_thread()
         .worker_threads(8)
         .max_blocking_threads(64)

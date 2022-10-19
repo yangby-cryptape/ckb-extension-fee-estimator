@@ -1,17 +1,16 @@
 use std::{
     cmp,
     collections::{BTreeMap, HashMap},
-    sync::Arc,
+    sync::{mpsc::SyncSender, Arc},
 };
 
-use ckb_fee_estimator::FeeRate;
-use ckb_types::{core::Capacity, packed::Byte32};
+use ckb_types::{
+    core::{Capacity, FeeRate},
+    packed::Byte32,
+};
 use parking_lot::RwLock;
 use serde::Deserialize;
-use tokio::{
-    select,
-    sync::{mpsc, oneshot},
-};
+use tokio::{select, sync::mpsc};
 
 use crate::{
     error::{RpcError, RpcResult},
@@ -546,7 +545,7 @@ impl FeeEstimator {
 
     fn spawn(self, rt: &Runtime) -> super::Controller {
         let (sender, mut receiver) =
-            mpsc::channel::<(super::Params, Option<oneshot::Sender<super::Result>>)>(100);
+            mpsc::channel::<(super::Params, Option<SyncSender<super::Result>>)>(100);
         let runtime = rt.clone();
         runtime.spawn(async move {
             let mut estimator = self;
@@ -562,11 +561,7 @@ impl FeeEstimator {
                 }
             }
         });
-        super::Controller {
-            name: NAME,
-            runtime,
-            sender,
-        }
+        super::Controller { name: NAME, sender }
     }
 
     async fn process(&mut self, msg: super::Params) -> super::Result {
@@ -660,7 +655,7 @@ impl FeeEstimator {
                 log::trace!(
                     "new-tx: tx {:#x} has {:.2}% probability commit in {} blocks (before block#{})",
                     tx.hash(),
-                    probability,
+                    probability * 100.0,
                     blocks,
                     expected
                 );

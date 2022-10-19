@@ -1,14 +1,14 @@
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{
+    collections::VecDeque,
+    sync::{mpsc::SyncSender, Arc},
+    time::Duration,
+};
 
-use ckb_fee_estimator::FeeRate;
-use ckb_types::core::Capacity;
+use ckb_types::core::{Capacity, FeeRate};
 use parking_lot::RwLock;
 use serde::Deserialize;
-use statrs::distribution::{Poisson, Univariate};
-use tokio::{
-    select,
-    sync::{mpsc, oneshot},
-};
+use statrs::distribution::{DiscreteCDF as _, Poisson};
+use tokio::{select, sync::mpsc};
 
 use crate::{
     error::{RpcError, RpcResult},
@@ -266,7 +266,7 @@ impl FeeEstimator {
                 let mut blocks = 0u32;
                 let poisson = Poisson::new(f64::from(average_blocks)).unwrap();
                 loop {
-                    let expected_probability = 1.0 - poisson.cdf(f64::from(blocks));
+                    let expected_probability = 1.0 - poisson.cdf(u64::from(blocks));
                     if expected_probability < f64::from(probability) {
                         break;
                     }
@@ -341,7 +341,7 @@ impl FeeEstimator {
 #[cfg(test)]
 mod tests {
     use super::FeeEstimator;
-    use ckb_fee_estimator::FeeRate;
+    use ckb_types::core::FeeRate;
 
     #[test]
     fn test_bucket_index_and_fee_rate_expected() {
@@ -418,7 +418,7 @@ impl FeeEstimator {
 
     fn spawn(self, rt: &Runtime) -> super::Controller {
         let (sender, mut receiver) =
-            mpsc::channel::<(super::Params, Option<oneshot::Sender<super::Result>>)>(100);
+            mpsc::channel::<(super::Params, Option<SyncSender<super::Result>>)>(100);
         let runtime = rt.clone();
         runtime.spawn(async move {
             let mut estimator = self;
@@ -434,11 +434,7 @@ impl FeeEstimator {
                 }
             }
         });
-        super::Controller {
-            name: NAME,
-            runtime,
-            sender,
-        }
+        super::Controller { name: NAME, sender }
     }
 
     async fn process(&mut self, msg: super::Params) -> super::Result {

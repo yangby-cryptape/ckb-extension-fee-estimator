@@ -4,8 +4,8 @@ use jsonrpc_http_server::Server;
 use tokio::sync::Notify;
 
 use crate::{
-    arguments::Arguments, error::Result, estimators::FeeEstimatorController, runtime::Runtime,
-    server, shared::Shared, statistics::Statistics, subscriber::Subscriber,
+    arguments::Cli, error::Result, estimators::FeeEstimatorController, runtime::Runtime, server,
+    shared::Shared, statistics::Statistics, subscriber::Subscriber,
 };
 
 pub(crate) struct Service {
@@ -15,13 +15,13 @@ pub(crate) struct Service {
 }
 
 impl Service {
-    pub(crate) fn start(args: &Arguments) -> Result<Service> {
-        let runtime = crate::runtime::initialize(args)?;
+    pub(crate) fn start(cli: &Cli) -> Result<Service> {
+        let runtime = crate::runtime::initialize(cli)?;
         let stats = Statistics::new(60 * 24 * 2);
         let estimators = FeeEstimatorController::initialize(&runtime, &stats);
-        let shared = Shared::initialize(args, &runtime, &stats, estimators.clone())?;
-        let _server = server::initialize(args.listen_addr(), estimators)?;
-        let _subscriber = Subscriber::initialize(args.subscribe_addr(), shared)?;
+        let shared = Shared::initialize(cli, &runtime, &stats, estimators.clone())?;
+        let _server = server::initialize(&runtime, cli.listen_addr(), estimators)?;
+        let _subscriber = Subscriber::initialize(cli.subscribe_addr(), shared)?;
         let service = Service {
             _server,
             _subscriber,
